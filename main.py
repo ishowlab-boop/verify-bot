@@ -5,26 +5,31 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-TOKEN = os.getenv("BOT_TOKEN")  # Set this in Render / Railway Environment Variables
+TOKEN = os.getenv("BOT_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Welcome to Verify Bot!\n\n"
-        "📸 যেকোনো ছবি পাঠাও, আমি Verified ব্যাজ লাগিয়ে দিবো।\n"
-        "🔢 অথবা /gesture লিখে হ্যান্ড জেসচার মেনু দেখো"
+        "👋 **Finger Verify Bot** চালু আছে!\n\n"
+        "📸 ইমেজ পাঠাও + ক্যাপশনে প্রম্পট লিখো\n"
+        "উদাহরণ:\n"
+        "right hand showing three fingers, index middle ring finger up"
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        # প্রম্পট নেওয়া (ক্যাপশন)
+        prompt = update.message.caption or "No prompt provided"
+        print(f"Received Prompt: {prompt}")  # লগ দেখার জন্য
+        
+        # ইমেজ ডাউনলোড
         photo = update.message.photo[-1]
         file = await context.bot.get_file(photo.file_id)
         image_bytes = await file.download_as_bytearray()
         
         img = Image.open(BytesIO(image_bytes)).convert("RGB")
         width, height = img.size
-        
         draw = ImageDraw.Draw(img)
         
         # Verified Badge
@@ -44,7 +49,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Verified Text
         try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", int(badge_size*0.35))
+            font = ImageFont.load_default()
         except:
             font = ImageFont.load_default()
         
@@ -54,42 +59,26 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_y = badge_y - int(badge_size * 0.65)
         draw.text((text_x, text_y), text, fill="#1DA1F2", font=font)
         
+        # সেভ
         output = BytesIO()
         img.save(output, format="PNG")
         output.seek(0)
         
         await update.message.reply_photo(
             photo=output,
-            caption="✅ Verified করে দিলাম!"
+            caption=f"✅ Verified!\n\n**প্রম্পট:** {prompt}\n\nএখনো শুধু Verified ব্যাজ লাগানো হয়েছে।\nপুরো AI ফিঙ্গার এডিট চাইলে বলো।"
         )
         
     except Exception as e:
-        await update.message.reply_text("❌ Error: " + str(e))
-
-async def gesture_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🤚 হ্যান্ড জেসচার মেনু:\n\n"
-        "1️⃣ /one\n"
-        "2️⃣ /two\n"
-        "3️⃣ /three\n"
-        "4️⃣ /four\n"
-        "5️⃣ /five\n"
-        "👍 /thumbsup\n"
-        "👎 /thumbsdown\n"
-        "🤙 /callme\n"
-        "🤞 /crossed\n"
-        "🫰 /heart\n\n"
-        "ছবি পাঠিয়ে পরে gesture চয়ন করো (আপাতত বেসিক)"
-    )
+        await update.message.reply_text(f"❌ Error: {str(e)}")
 
 def main():
     app = Application.builder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("gesture", gesture_menu))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     
-    print("🤖 Bot is running...")
+    print("🤖 Finger Verify Bot চালু হয়েছে...")
     app.run_polling()
 
 if __name__ == "__main__":
