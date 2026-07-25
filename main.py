@@ -23,6 +23,8 @@ FREE_CREDIT_AFTER_JOIN = 1
 
 WAITING_PHOTO = 1
 WAITING_SIGN = 2
+ADMIN_WAIT_ID = 3
+ADMIN_WAIT_AMOUNT = 4
 
 logging.basicConfig(level=logging.INFO)
 
@@ -89,6 +91,7 @@ def admin_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("Manage Credits")],
         [KeyboardButton("List Users")],
+        [KeyboardButton("List Premium Users")],
         [KeyboardButton("Stats")],
         [KeyboardButton("Broadcast")],
         [KeyboardButton("Back to Menu")]
@@ -157,7 +160,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     elif text == "Manage Credits" and user_id == OWNER_ID:
-        await update.message.reply_text("Use: /addcredit user_id amount")
+        await update.message.reply_text("Send User ID for credits:")
+        return ADMIN_WAIT_ID
 
     elif text == "List Users" and user_id == OWNER_ID:
         users = load_users()
@@ -169,6 +173,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg += f"`{uid}`\n"
         await update.message.reply_text(msg, parse_mode="Markdown")
 
+    elif text == "List Premium Users" and user_id == OWNER_ID:
+        data = load_credits()
+        premium = {k: v for k, v in data.items() if v > 0}
+        if not premium:
+            await update.message.reply_text("No premium users.")
+            return
+        msg = "⭐ Premium Users:\n\n"
+        for uid, bal in premium.items():
+            msg += f"ID: `{uid}` | Credit: {bal}\n"
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
     elif text == "Stats" and user_id == OWNER_ID:
         await update.message.reply_text(f"📊 Active Users: {len(load_users())}")
 
@@ -177,6 +192,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "Back to Menu":
         await update.message.reply_text("Main Menu", reply_markup=main_keyboard())
+
+async def admin_receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        target_id = int(update.message.text)
+        context.user_data["target_id"] = target_id
+        await update.message.reply_text(f"User ID: {target_id}\n\nHow many credits to add?")
+        return ADMIN_WAIT_AMOUNT
+    except:
+        await update.message.reply_text("Invalid ID. Send a valid number.")
+        return ADMIN_WAIT_ID
+
+async def admin_receive_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        amount = int(update.message.text)
+        target_id = context.user_data.get("target_id")
+        add_credit(target_id, amount)
+        await update.message.reply_text(
+            f"✅ Added {amount} credits to {target_id}\nNew Balance: {get_credit(target_id)}",
+            reply_markup=admin_keyboard()
+        )
+        return ConversationHandler.END
+    except:
+        await update.message.reply_text("Invalid amount. Send a number.")
+        return ADMIN_WAIT_AMOUNT
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -270,17 +309,6 @@ async def process_sign(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
-async def addcredit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        return
-    try:
-        uid = int(context.args[0])
-        amount = int(context.args[1])
-        add_credit(uid, amount)
-        await update.message.reply_text(f"✅ Added {amount} to {uid}\nBalance: {get_credit(uid)}")
-    except:
-        await update.message.reply_text("Usage: /addcredit user_id amount")
-
 async def post_init(app: Application):
     await app.bot.set_my_commands([
         BotCommand("start", "Start the bot"),
@@ -291,17 +319,21 @@ def main():
     app = Application.builder().token(TOKEN).post_init(post_init).build()
 
     conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^✋ Finger Verify$"), handle_message)],
+        entry_points=[
+            MessageHandler(filters.Regex("^✋ Finger Verify$"), handle_message),
+            MessageHandler(filters.Regex("^Manage Credits$"), handle_message),
+        ],
         states={
             WAITING_PHOTO: [MessageHandler(filters.PHOTO, receive_photo), MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)],
             WAITING_SIGN: [CallbackQueryHandler(process_sign)],
+            ADMIN_WAIT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_id)],
+            ADMIN_WAIT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_amount)],
         },
         fallbacks=[MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)],
     )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin_cmd))
-    app.add_handler(CommandHandler("addcredit", addcredit_cmd))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
