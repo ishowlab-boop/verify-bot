@@ -14,9 +14,10 @@ from telegram.ext import (
 TOKEN = os.getenv("BOT_TOKEN")
 XAI_API_KEY = os.getenv("XAI_API_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
-CHANNEL_USERNAME = "ariyanvoice"          # without @
+CHANNEL_USERNAME = "ariyanvoice"
 ADMIN_LINK = "https://t.me/AriyanInfo"
 CREDITS_FILE = "credits.json"
+USERS_FILE = "users.json"
 FREE_CREDIT_AFTER_JOIN = 1
 
 WAITING_PHOTO = 1
@@ -54,17 +55,37 @@ def use_credit(user_id):
         return True
     return False
 
+# ================== ACTIVE USERS ==================
+def load_users():
+    try:
+        with open(USERS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return []
+
+def save_users(data):
+    with open(USERS_FILE, "w") as f:
+        json.dump(data, f)
+
+def add_user(user_id):
+    users = load_users()
+    if user_id not in users:
+        users.append(user_id)
+        save_users(users)
+
 # ================== CHANNEL CHECK ==================
 async def is_joined(context, user_id):
     try:
         member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
         return member.status in ["member", "administrator", "creator"]
-    except:
+    except Exception as e:
+        logging.error(f"Channel check error: {e}")
         return False
 
 # ================== START ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    add_user(user_id)
 
     if not await is_joined(context, user_id):
         keyboard = [
@@ -78,7 +99,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Give free credit if first time
     data = load_credits()
     if str(user_id) not in data:
         add_credit(user_id, FREE_CREDIT_AFTER_JOIN)
@@ -107,9 +127,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if await is_joined(context, user_id):
             if str(user_id) not in load_credits():
                 add_credit(user_id, FREE_CREDIT_AFTER_JOIN)
-            await query.edit_message_text("✅ Verified! You received free credit.\n\nPress /start again.")
+            await query.edit_message_text("✅ Verified! You received free credit.\n\nNow press /start again.")
         else:
-            await query.edit_message_text("❌ You still haven't joined the channel.")
+            keyboard = [
+                [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{CHANNEL_USERNAME}")],
+                [InlineKeyboardButton("✅ I Joined", callback_data="check_join")]
+            ]
+            await query.edit_message_text(
+                "❌ You still haven't joined the channel.\n\nPlease join and press the button again.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         return ConversationHandler.END
 
     if data == "finger":
@@ -276,23 +303,28 @@ async def process_sign(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
-# ================== ADMIN COMMAND ==================
+# ================== ADMIN COMMANDS ==================
 async def addcredit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != OWNER_ID:
         await update.message.reply_text("❌ Only Admin can use this.")
         return
-
     try:
         args = context.args
         user_id = int(args[0])
         amount = int(args[1])
         add_credit(user_id, amount)
         await update.message.reply_text(
-            f"✅ Added {amount} credit to {user_id}\n"
-            f"Now balance: {get_credit(user_id)}"
+            f"✅ Added {amount} credit to {user_id}\nNow balance: {get_credit(user_id)}"
         )
     except:
         await update.message.reply_text("Usage: /addcredit user_id amount")
+
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.from_user.id != OWNER_ID:
+        await update.message.reply_text("❌ Only Admin can use this.")
+        return
+    total = len(load_users())
+    await update.message.reply_text(f"📊 Total Active Users: {total}")
 
 # ================== MAIN ==================
 def main():
@@ -309,6 +341,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("addcredit", addcredit_cmd))
+    app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(conv)
 
