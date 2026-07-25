@@ -25,6 +25,7 @@ WAITING_PHOTO = 1
 WAITING_SIGN = 2
 ADMIN_WAIT_ID = 3
 ADMIN_WAIT_AMOUNT = 4
+ADMIN_WAIT_ACTION = 5
 
 logging.basicConfig(level=logging.INFO)
 
@@ -61,17 +62,16 @@ def load_users():
         with open(USERS_FILE, "r") as f:
             return json.load(f)
     except:
-        return []
+        return {}
 
 def save_users(data):
     with open(USERS_FILE, "w") as f:
         json.dump(data, f)
 
-def add_user(user_id):
+def add_user(user_id, username=None):
     users = load_users()
-    if user_id not in users:
-        users.append(user_id)
-        save_users(users)
+    users[str(user_id)] = username or "unknown"
+    save_users(users)
 
 async def is_joined(context, user_id):
     try:
@@ -98,10 +98,10 @@ def admin_keyboard():
     ], resize_keyboard=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    add_user(user_id)
+    user = update.effective_user
+    add_user(user.id, user.username)
 
-    if not await is_joined(context, user_id):
+    if not await is_joined(context, user.id):
         keyboard = [
             [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{CHANNEL_USERNAME}")],
             [InlineKeyboardButton("✅ I Joined", callback_data="check_join")]
@@ -112,8 +112,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if str(user_id) not in load_credits():
-        add_credit(user_id, FREE_CREDIT_AFTER_JOIN)
+    if str(user.id) not in load_credits():
+        add_credit(user.id, FREE_CREDIT_AFTER_JOIN)
 
     await update.message.reply_text(
         "👋 Welcome to PoseCore Bot\n\nChoose an option from the menu below:",
@@ -160,29 +160,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     elif text == "Manage Credits" and user_id == OWNER_ID:
-        await update.message.reply_text("Send User ID for credits:")
+        users = load_users()
+        credits = load_credits()
+        if not users:
+            await update.message.reply_text("No users yet.")
+            return
+        msg = "Send User ID for credits:\n\n"
+        for uid, uname in list(users.items())[-20:]:
+            bal = credits.get(uid, 0)
+            msg += f"{uid} @{uname} credits={bal}\n"
+        await update.message.reply_text(msg)
         return ADMIN_WAIT_ID
 
     elif text == "List Users" and user_id == OWNER_ID:
         users = load_users()
+        credits = load_credits()
         if not users:
             await update.message.reply_text("No users yet.")
             return
-        msg = "📊 User List (Last 30):\n\n"
-        for uid in users[-30:]:
-            msg += f"`{uid}`\n"
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        msg = "📊 User List:\n\n"
+        for uid, uname in list(users.items())[-30:]:
+            bal = credits.get(uid, 0)
+            msg += f"{uid} @{uname} credits={bal}\n"
+        await update.message.reply_text(msg)
 
     elif text == "List Premium Users" and user_id == OWNER_ID:
-        data = load_credits()
-        premium = {k: v for k, v in data.items() if v > 0}
+        users = load_users()
+        credits = load_credits()
+        premium = {k: v for k, v in credits.items() if v > 0}
         if not premium:
             await update.message.reply_text("No premium users.")
             return
         msg = "⭐ Premium Users:\n\n"
         for uid, bal in premium.items():
-            msg += f"ID: `{uid}` | Credit: {bal}\n"
-        await update.message.reply_text(msg, parse_mode="Markdown")
+            uname = users.get(uid, "unknown")
+            msg += f"{uid} @{uname} credits={bal}\n"
+        await update.message.reply_text(msg)
 
     elif text == "Stats" and user_id == OWNER_ID:
         await update.message.reply_text(f"📊 Active Users: {len(load_users())}")
@@ -195,23 +208,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        target_id = int(update.message.text)
+        target_id = int(update.message.text.split()[0])
         context.user_data["target_id"] = target_id
-        await update.message.reply_text(f"User ID: {target_id}\n\nHow many credits to add?")
-        return ADMIN_WAIT_AMOUNT
+        keyboard = [
+            [KeyboardButton("➕ Add Credits"), KeyboardButton("➖ Remove Credits")],
+            [KeyboardButton("🔙 Back")]
+        ]
+        await update.message.reply_text(
+            f"User {target_id}\nChoose credits action:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return ADMIN_WAIT_ACTION
     except:
         await update.message.reply_text("Invalid ID. Send a valid number.")
         return ADMIN_WAIT_ID
+
+async def admin_receive_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "🔙 Back":
+        await update.message.reply_text("Admin Panel", reply_markup=admin_keyboard())
+        return ConversationHandler.END
+
+    context.user_data["action"] = "add" if "Add" in text else "remove"
+    await update.message.reply_text("How many credits?")
+    return ADMIN_WAIT_AMOUNT
 
 async def admin_receive_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         amount = int(update.message.text)
         target_id = context.user_data.get("target_id")
-        add_credit(target_id, amount)
-        await update.message.reply_text(
-            f"✅ Added {amount} credits to {target_id}\nNew Balance: {get_credit(target_id)}",
-            reply_markup=admin_keyboard()
-        )
+        action = context.user_data.get("action")
+
+        if action == "add":
+            add_credit(target_id, amount)
+            msg = f"✅ Added {amount} credits to {target_id}\nNew Balance: {get_credit(target_id)}"
+        else:
+            add_credit(target_id, -amount)
+            msg = f"✅ Removed {amount} credits from {target_id}\nNew Balance: {get_credit(target_id)}"
+
+        await update.message.reply_text(msg, reply_markup=admin_keyboard())
         return ConversationHandler.END
     except:
         await update.message.reply_text("Invalid amount. Send a number.")
@@ -327,6 +362,7 @@ def main():
             WAITING_PHOTO: [MessageHandler(filters.PHOTO, receive_photo), MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)],
             WAITING_SIGN: [CallbackQueryHandler(process_sign)],
             ADMIN_WAIT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_id)],
+            ADMIN_WAIT_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_action)],
             ADMIN_WAIT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_amount)],
         },
         fallbacks=[MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)],
