@@ -84,7 +84,7 @@ async def is_joined(context, user_id):
         logging.error(f"Channel check error: {e}")
         return False
 
-# ================== MAIN KEYBOARD ==================
+# ================== KEYBOARDS ==================
 def main_keyboard():
     keyboard = [
         [KeyboardButton("✋ Finger Verify"), KeyboardButton("📄 Paper Verify")],
@@ -128,6 +128,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_keyboard()
     )
 
+# ================== ADMIN COMMAND ==================
+async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await update.message.reply_text("❌ Only Admin can use this.")
+        return
+    await update.message.reply_text("🔐 Admin Panel", reply_markup=admin_keyboard())
+
 # ================== MESSAGE HANDLER ==================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -139,15 +147,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Your credit is finished.\nContact admin to buy more.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Admin", url=ADMIN_LINK)]])
             )
-            return
+            return ConversationHandler.END
+        keyboard = [[KeyboardButton("❌ Cancel")]]
         await update.message.reply_text(
-            "✋ Finger Verify\n\nSend one clear photo of the girl now.\nNext you will choose the hand sign.",
-            reply_markup=ReplyKeyboardRemove()
+            "✋ Finger Verify\n\nSend one clear photo of the girl now.\nNext you will choose the hand sign.\n\nPress Cancel to go back.",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
         return WAITING_PHOTO
 
     elif text == "📄 Paper Verify":
-        await update.message.reply_text("📄 Paper Verify\n\nComing soon...")
+        await update.message.reply_text(
+            "📄 Paper Verify\n\nSend one clear photo of the girl now.\nNext you will choose the paper pose."
+        )
 
     elif text == "🎤 Voice":
         await update.message.reply_text(
@@ -171,8 +182,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💬 Message Admin", url=ADMIN_LINK)]])
         )
 
-    elif text == "/admin" and user_id == OWNER_ID:
-        await update.message.reply_text("🔐 Admin Panel", reply_markup=admin_keyboard())
+    elif text == "❌ Cancel":
+        await update.message.reply_text("Cancelled. Back to menu.", reply_markup=main_keyboard())
+        return ConversationHandler.END
 
     elif text == "Manage Credits" and user_id == OWNER_ID:
         await update.message.reply_text("Send: /addcredit user_id amount\nExample: /addcredit 123456789 10")
@@ -242,6 +254,7 @@ async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🤏 Pinching", callback_data="sign_pinch")],
         [InlineKeyboardButton("🖕 Middle Finger", callback_data="sign_middle")],
         [InlineKeyboardButton("🤝 Handshake", callback_data="sign_handshake")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_sign")],
     ]
     await update.message.reply_text("Choose the hand sign:", reply_markup=InlineKeyboardMarkup(keyboard))
     return WAITING_SIGN
@@ -250,6 +263,12 @@ async def process_sign(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
+
+    if query.data == "cancel_sign":
+        await query.edit_message_text("Cancelled.")
+        await context.bot.send_message(chat_id=query.message.chat_id, text="Back to menu.", reply_markup=main_keyboard())
+        return ConversationHandler.END
+
     sign = query.data.replace("sign_", "")
 
     sign_map = {
@@ -336,7 +355,7 @@ async def process_sign(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
-# ================== ADMIN ==================
+# ================== ADD CREDIT ==================
 async def addcredit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != OWNER_ID:
         return
@@ -356,15 +375,18 @@ def main():
     conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^✋ Finger Verify$"), handle_message)],
         states={
-            WAITING_PHOTO: [MessageHandler(filters.PHOTO, receive_photo)],
-            WAITING_SIGN: [CallbackQueryHandler(process_sign, pattern="^sign_")],
+            WAITING_PHOTO: [
+                MessageHandler(filters.PHOTO, receive_photo),
+                MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)
+            ],
+            WAITING_SIGN: [CallbackQueryHandler(process_sign, pattern="^(sign_|cancel_sign)")],
         },
-        fallbacks=[],
+        fallbacks=[MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)],
     )
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin_cmd))
     app.add_handler(CommandHandler("addcredit", addcredit_cmd))
-    app.add_handler(CommandHandler("admin", handle_message))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
