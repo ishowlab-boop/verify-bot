@@ -44,7 +44,7 @@ def get_credit(user_id):
 
 def add_credit(user_id, amount):
     data = load_credits()
-    data[str(user_id)] = data.get(str(user_id), 0) + amount
+    data[str(user_id)] = max(0, data.get(str(user_id), 0) + amount)
     save_credits(data)
 
 def use_credit(user_id):
@@ -161,11 +161,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "Manage Credits" and user_id == OWNER_ID:
         users = load_users()
         credits = load_credits()
-        if not users:
-            await update.message.reply_text("No users yet.")
-            return
         msg = "Send User ID for credits:\n\n"
-        for uid, uname in list(users.items())[-20:]:
+        for uid, uname in list(users.items())[-15:]:
             bal = credits.get(uid, 0)
             msg += f"{uid} @{uname} credits={bal}\n"
         await update.message.reply_text(msg)
@@ -174,9 +171,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "List Users" and user_id == OWNER_ID:
         users = load_users()
         credits = load_credits()
-        if not users:
-            await update.message.reply_text("No users yet.")
-            return
         msg = "📊 User List:\n\n"
         for uid, uname in list(users.items())[-30:]:
             bal = credits.get(uid, 0)
@@ -207,7 +201,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        target_id = int(update.message.text.split()[0])
+        target_id = int(update.message.text.strip().split()[0])
         context.user_data["target_id"] = target_id
         keyboard = [
             [KeyboardButton("➕ Add Credits"), KeyboardButton("➖ Remove Credits")],
@@ -219,7 +213,7 @@ async def admin_receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ADMIN_WAIT_ACTION
     except:
-        await update.message.reply_text("Invalid ID. Send a valid number.")
+        await update.message.reply_text("Invalid ID. Send only the number.")
         return ADMIN_WAIT_ID
 
 async def admin_receive_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -234,7 +228,7 @@ async def admin_receive_action(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def admin_receive_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        amount = int(update.message.text)
+        amount = int(update.message.text.strip())
         target_id = context.user_data.get("target_id")
         action = context.user_data.get("action")
 
@@ -335,7 +329,10 @@ def main():
             MessageHandler(filters.Regex("^Manage Credits$"), handle_message),
         ],
         states={
-            WAITING_PHOTO: [MessageHandler(filters.PHOTO, receive_photo), MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)],
+            WAITING_PHOTO: [
+                MessageHandler(filters.PHOTO, receive_photo),
+                MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)
+            ],
             ADMIN_WAIT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_id)],
             ADMIN_WAIT_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_action)],
             ADMIN_WAIT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_amount)],
