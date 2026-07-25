@@ -22,7 +22,6 @@ USERS_FILE = "users.json"
 FREE_CREDIT_AFTER_JOIN = 1
 
 WAITING_PHOTO = 1
-WAITING_SIGN = 2
 ADMIN_WAIT_ID = 3
 ADMIN_WAIT_AMOUNT = 4
 ADMIN_WAIT_ACTION = 5
@@ -135,13 +134,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Credit finished.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Contact Admin", url=ADMIN_LINK)]]))
             return
         await update.message.reply_text(
-            "✋ Finger Verify\n\nSend one clear photo now.\nPress Cancel to go back.",
+            "✋ Finger Verify\n\nSend one clear photo + caption (example: two fingers / nose touch)\nPress Cancel to go back.",
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Cancel")]], resize_keyboard=True)
         )
         return WAITING_PHOTO
 
     elif text == "📄 Paper Verify":
-        await update.message.reply_text("📄 Paper Verify\n\nSend one clear photo of the girl now.\nNext you will choose the paper pose.")
+        await update.message.reply_text("📄 Paper Verify\n\nSend one clear photo + caption.")
 
     elif text == "🎤 Voice":
         await update.message.reply_text("🎤 Voice Feature", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open Voice Channel", url=VOICE_LINK)]]))
@@ -268,57 +267,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Still not joined.", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["photo_id"] = update.message.photo[-1].file_id
-    keyboard = [
-        [InlineKeyboardButton("☝️ One Finger", callback_data="sign_one")],
-        [InlineKeyboardButton("✌️ Two Fingers", callback_data="sign_two")],
-        [InlineKeyboardButton("🤟 Three Fingers", callback_data="sign_three")],
-        [InlineKeyboardButton("🖖 Four Fingers", callback_data="sign_four")],
-        [InlineKeyboardButton("🖐️ Open Hand", callback_data="sign_open")],
-        [InlineKeyboardButton("👍 Thumbs Up", callback_data="sign_thumbs")],
-        [InlineKeyboardButton("🤚 Hand on Head", callback_data="sign_head")],
-        [InlineKeyboardButton("✍️ Holding Pen", callback_data="sign_pen")],
-        [InlineKeyboardButton("📝 Holding Paper", callback_data="sign_paper")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_sign")],
-    ]
-    await update.message.reply_text("Choose hand sign:", reply_markup=InlineKeyboardMarkup(keyboard))
-    return WAITING_SIGN
+    user_id = update.message.from_user.id
+    caption = update.message.caption or "three fingers"
 
-async def process_sign(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-
-    if query.data == "cancel_sign":
-        await query.edit_message_text("Cancelled.")
-        await context.bot.send_message(query.message.chat_id, "Back to menu.", reply_markup=main_keyboard())
+    if get_credit(user_id) <= 0:
+        await update.message.reply_text("❌ Credit finished.", reply_markup=main_keyboard())
         return ConversationHandler.END
-
-    sign_map = {
-        "one": "one finger pointing up",
-        "two": "two fingers",
-        "three": "three fingers",
-        "four": "four fingers",
-        "open": "open hand",
-        "thumbs": "thumbs up",
-        "head": "hand on head",
-        "pen": "holding a pen",
-        "paper": "holding a white paper"
-    }
-    caption = sign_map.get(query.data.replace("sign_", ""), "three fingers")
 
     if not use_credit(user_id):
-        await query.edit_message_text("❌ Credit finished.")
+        await update.message.reply_text("❌ Credit finished.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    await query.edit_message_text("⏳ Processing...")
+    await update.message.reply_text("⏳ Processing...")
 
     try:
-        file = await context.bot.get_file(context.user_data["photo_id"])
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
         image_bytes = await file.download_as_bytearray()
         data_uri = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
 
-        prompt = f"Keep the exact same girl, exact same face, hair, body, clothes, background. Only change the hand to show: {caption}. Photorealistic."
+        prompt = (
+            f"Keep the exact same girl from the reference image. "
+            f"Exact same face, eyes, nose, lips, hair, skin, body, clothes, background and lighting. "
+            f"Do not change the identity at all. "
+            f"Only change the hand pose to: {caption}. "
+            f"Natural realistic hand, correct fingers, photorealistic, high quality."
+        )
 
         response = requests.post(
             "https://api.x.ai/v1/images/edits",
@@ -329,18 +303,20 @@ async def process_sign(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if response.status_code != 200:
             add_credit(user_id, 1)
-            await query.edit_message_text(f"Error: {response.text}")
+            await update.message.reply_text(f"Error: {response.text}", reply_markup=main_keyboard())
             return ConversationHandler.END
 
         img_url = response.json()["data"][0]["url"]
         img_data = requests.get(img_url).content
-        await context.bot.send_photo(query.message.chat_id, photo=BytesIO(img_data), caption=f"✅ Done!\nRemaining: {get_credit(user_id)}")
-        await context.bot.send_message(query.message.chat_id, "Menu:", reply_markup=main_keyboard())
-        await query.delete_message()
+        await update.message.reply_photo(
+            photo=BytesIO(img_data),
+            caption=f"✅ Done!\nPrompt: {caption}\nRemaining: {get_credit(user_id)}"
+        )
+        await update.message.reply_text("Menu:", reply_markup=main_keyboard())
 
     except Exception as e:
         add_credit(user_id, 1)
-        await query.edit_message_text(f"Error: {e}")
+        await update.message.reply_text(f"Error: {e}", reply_markup=main_keyboard())
 
     return ConversationHandler.END
 
@@ -360,7 +336,6 @@ def main():
         ],
         states={
             WAITING_PHOTO: [MessageHandler(filters.PHOTO, receive_photo), MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)],
-            WAITING_SIGN: [CallbackQueryHandler(process_sign)],
             ADMIN_WAIT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_id)],
             ADMIN_WAIT_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_action)],
             ADMIN_WAIT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_amount)],
