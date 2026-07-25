@@ -4,6 +4,7 @@ import os
 import base64
 import json
 import requests
+from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, BotCommand
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -19,58 +20,61 @@ WEBSITE_LINK = "https://modelboxbd.com"
 VOICE_LINK = "https://t.me/ariyanvoice"
 CREDITS_FILE = "credits.json"
 USERS_FILE = "users.json"
+VALIDITY_FILE = "validity.json"
 FREE_CREDIT_AFTER_JOIN = 1
 
 WAITING_PHOTO = 1
 ADMIN_WAIT_ID = 3
 ADMIN_WAIT_AMOUNT = 4
 ADMIN_WAIT_ACTION = 5
+ADMIN_WAIT_VALIDITY = 6
 
 logging.basicConfig(level=logging.INFO)
 
-def load_credits():
+def load_json(file):
     try:
-        with open(CREDITS_FILE, "r") as f:
+        with open(file, "r") as f:
             return json.load(f)
     except:
         return {}
 
-def save_credits(data):
-    with open(CREDITS_FILE, "w") as f:
+def save_json(file, data):
+    with open(file, "w") as f:
         json.dump(data, f)
 
 def get_credit(user_id):
-    return load_credits().get(str(user_id), 0)
+    return load_json(CREDITS_FILE).get(str(user_id), 0)
 
 def add_credit(user_id, amount):
-    data = load_credits()
+    data = load_json(CREDITS_FILE)
     data[str(user_id)] = max(0, data.get(str(user_id), 0) + amount)
-    save_credits(data)
+    save_json(CREDITS_FILE, data)
 
 def use_credit(user_id):
-    data = load_credits()
+    data = load_json(CREDITS_FILE)
     uid = str(user_id)
     if data.get(uid, 0) > 0:
         data[uid] -= 1
-        save_credits(data)
+        save_json(CREDITS_FILE, data)
         return True
     return False
 
-def load_users():
-    try:
-        with open(USERS_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {}
+def set_validity(user_id, days):
+    data = load_json(VALIDITY_FILE)
+    expire = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+    data[str(user_id)] = expire
+    save_json(VALIDITY_FILE, data)
 
-def save_users(data):
-    with open(USERS_FILE, "w") as f:
-        json.dump(data, f)
+def get_validity(user_id):
+    return load_json(VALIDITY_FILE).get(str(user_id), "None")
+
+def load_users():
+    return load_json(USERS_FILE)
 
 def add_user(user_id, username=None):
     users = load_users()
     users[str(user_id)] = username or "unknown"
-    save_users(users)
+    save_json(USERS_FILE, users)
 
 async def is_joined(context, user_id):
     try:
@@ -111,7 +115,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if str(user.id) not in load_credits():
+    if str(user.id) not in load_json(CREDITS_FILE):
         add_credit(user.id, FREE_CREDIT_AFTER_JOIN)
 
     await update.message.reply_text(
@@ -146,7 +150,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🎤 Voice Feature", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open Voice Channel", url=VOICE_LINK)]]))
 
     elif text == "💰 My Credit":
-        await update.message.reply_text(f"💰 Your Credit: {get_credit(user_id)}")
+        await update.message.reply_text(f"💰 Your Credit: {get_credit(user_id)}\nValidity: {get_validity(user_id)}")
 
     elif text == "🌐 Website":
         await update.message.reply_text("🌐 Our Website", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open Website", url=WEBSITE_LINK)]]))
@@ -160,7 +164,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "Manage Credits" and user_id == OWNER_ID:
         users = load_users()
-        credits = load_credits()
+        credits = load_json(CREDITS_FILE)
         msg = "Send User ID for credits:\n\n"
         for uid, uname in list(users.items())[-15:]:
             bal = credits.get(uid, 0)
@@ -170,7 +174,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "List Users" and user_id == OWNER_ID:
         users = load_users()
-        credits = load_credits()
+        credits = load_json(CREDITS_FILE)
         msg = "📊 User List:\n\n"
         for uid, uname in list(users.items())[-30:]:
             bal = credits.get(uid, 0)
@@ -179,7 +183,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "List Premium Users" and user_id == OWNER_ID:
         users = load_users()
-        credits = load_credits()
+        credits = load_json(CREDITS_FILE)
         premium = {k: v for k, v in credits.items() if v > 0}
         if not premium:
             await update.message.reply_text("No premium users.")
@@ -205,10 +209,11 @@ async def admin_receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["target_id"] = target_id
         keyboard = [
             [KeyboardButton("➕ Add Credits"), KeyboardButton("➖ Remove Credits")],
+            [KeyboardButton("📅 Set Validity")],
             [KeyboardButton("🔙 Back")]
         ]
         await update.message.reply_text(
-            f"User {target_id}\nChoose credits action:",
+            f"User {target_id}\nChoose action:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
         return ADMIN_WAIT_ACTION
@@ -221,6 +226,10 @@ async def admin_receive_action(update: Update, context: ContextTypes.DEFAULT_TYP
     if text == "🔙 Back":
         await update.message.reply_text("Admin Panel", reply_markup=admin_keyboard())
         return ConversationHandler.END
+
+    if "Validity" in text:
+        await update.message.reply_text("How many days validity?")
+        return ADMIN_WAIT_VALIDITY
 
     context.user_data["action"] = "add" if "Add" in text else "remove"
     await update.message.reply_text("How many credits?")
@@ -242,15 +251,29 @@ async def admin_receive_amount(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(msg, reply_markup=admin_keyboard())
         return ConversationHandler.END
     except:
-        await update.message.reply_text("Invalid amount. Send a number.")
+        await update.message.reply_text("Invalid amount.")
         return ADMIN_WAIT_AMOUNT
+
+async def admin_receive_validity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        days = int(update.message.text.strip())
+        target_id = context.user_data.get("target_id")
+        set_validity(target_id, days)
+        await update.message.reply_text(
+            f"✅ Set {days} days validity for {target_id}\nExpire: {get_validity(target_id)}",
+            reply_markup=admin_keyboard()
+        )
+        return ConversationHandler.END
+    except:
+        await update.message.reply_text("Invalid days.")
+        return ADMIN_WAIT_VALIDITY
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.data == "check_join":
         if await is_joined(context, query.from_user.id):
-            if str(query.from_user.id) not in load_credits():
+            if str(query.from_user.id) not in load_json(CREDITS_FILE):
                 add_credit(query.from_user.id, FREE_CREDIT_AFTER_JOIN)
             await query.edit_message_text("✅ Verified! Press /start again.")
         else:
@@ -336,6 +359,7 @@ def main():
             ADMIN_WAIT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_id)],
             ADMIN_WAIT_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_action)],
             ADMIN_WAIT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_amount)],
+            ADMIN_WAIT_VALIDITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_validity)],
         },
         fallbacks=[MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)],
     )
