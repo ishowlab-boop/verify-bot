@@ -21,33 +21,26 @@ logging.basicConfig(level=logging.INFO)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 **AI Finger Verify Bot** রেডি!\n\n"
-        "কীভাবে ব্যবহার করবে:\n"
-        "1. একটা ছবি পাঠাও\n"
-        "2. ক্যাপশনে লিখো:\n"
-        "   • three fingers\n"
-        "   • two fingers\n"
-        "   • thumbs up\n"
-        "   • call me\n"
-        "   • finger heart\n"
-        "   • hand on head\n"
-        "   • rose holding\n\n"
-        "আমি AI দিয়ে শুধু হাত বদলে দিবো, মুখ একদম একই থাকবে।"
+        "👋 **AI Finger Bot** রেডি!\n\n"
+        "ছবি পাঠাও + ক্যাপশনে লিখো কী হাত চাও\n"
+        "উদাহরণ: two fingers / three fingers / thumbs up"
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         caption = update.message.caption or "three fingers"
-        await update.message.reply_text("⏳ AI প্রসেসিং চলছে... (১৫-৩০ সেকেন্ড লাগতে পারে)")
+        await update.message.reply_text("⏳ প্রসেসিং চলছে...")
 
         photo = update.message.photo[-1]
         file = await context.bot.get_file(photo.file_id)
         image_bytes = await file.download_as_bytearray()
 
         prompt = (
-            f"Keep the exact same girl, exact same face, exact same eyes, nose, lips, hair, skin, body, clothes, background and lighting. "
-            f"Do not change the face at all. Only change the right hand pose to show {caption}. "
-            f"Natural realistic hand, detailed fingers, perfect skin tone, seamless blend, photorealistic, high quality."
+            f"Photorealistic photo of the exact same woman from the reference image. "
+            f"Keep 100% identical face, eyes, nose, lips, hair, skin tone, body shape, clothes, background, lighting and camera angle. "
+            f"Do not change the face or identity at all. "
+            f"Only change the hand pose to: {caption}. "
+            f"Natural realistic hand with correct number of fingers, perfect anatomy, seamless blend."
         )
 
         output = replicate_client.run(
@@ -55,7 +48,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             input={
                 "image": BytesIO(image_bytes),
                 "prompt": prompt,
-                "strength": 0.40,
+                "strength": 0.28,
                 "num_outputs": 1,
                 "aspect_ratio": "1:1",
                 "output_quality": 95
@@ -63,7 +56,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         edited_image = requests.get(output[0]).content
-
         img = Image.open(BytesIO(edited_image)).convert("RGB")
 
         output_io = BytesIO()
@@ -72,7 +64,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_photo(
             photo=output_io,
-            caption=f"✅ Done!\n**প্রম্পট:** {caption}"
+            caption=f"✅ Done\nPrompt: {caption}"
         )
 
     except Exception as e:
@@ -82,8 +74,7 @@ def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    
-    print("🤖 AI Finger Verify Bot চালু...")
+    print("Bot started...")
     app.run_polling()
 
 if __name__ == "__main__":
