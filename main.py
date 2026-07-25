@@ -6,21 +6,25 @@ import json
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, 
+    Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes, ConversationHandler
 )
 
+# ================== CONFIG ==================
 TOKEN = os.getenv("BOT_TOKEN")
 XAI_API_KEY = os.getenv("XAI_API_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
-
+CHANNEL_USERNAME = "ariyanvoice"          # without @
+ADMIN_LINK = "https://t.me/AriyanInfo"
 CREDITS_FILE = "credits.json"
+FREE_CREDIT_AFTER_JOIN = 1
 
 WAITING_PHOTO = 1
 WAITING_SIGN = 2
 
 logging.basicConfig(level=logging.INFO)
 
+# ================== CREDIT SYSTEM ==================
 def load_credits():
     try:
         with open(CREDITS_FILE, "r") as f:
@@ -50,7 +54,35 @@ def use_credit(user_id):
         return True
     return False
 
+# ================== CHANNEL CHECK ==================
+async def is_joined(context, user_id):
+    try:
+        member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except:
+        return False
+
+# ================== START ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if not await is_joined(context, user_id):
+        keyboard = [
+            [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{CHANNEL_USERNAME}")],
+            [InlineKeyboardButton("✅ I Joined", callback_data="check_join")]
+        ]
+        await update.message.reply_text(
+            "🔒 Please join our channel first to use this bot.\n\n"
+            "After joining, press the button below.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    # Give free credit if first time
+    data = load_credits()
+    if str(user_id) not in data:
+        add_credit(user_id, FREE_CREDIT_AFTER_JOIN)
+
     keyboard = [
         [InlineKeyboardButton("✋ Finger Verify", callback_data="finger")],
         [InlineKeyboardButton("📄 Paper Verify", callback_data="paper")],
@@ -58,51 +90,66 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💰 My Credit", callback_data="credit")],
         [InlineKeyboardButton("🌐 Website", callback_data="website")],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await update.message.reply_text(
         "👋 Welcome to Verify Bot\n\n"
-        "নিচের বাটন থেকে বেছে নাও:",
-        reply_markup=reply_markup
+        "Choose an option below:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
+# ================== BUTTON HANDLER ==================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
     user_id = query.from_user.id
 
+    if data == "check_join":
+        if await is_joined(context, user_id):
+            if str(user_id) not in load_credits():
+                add_credit(user_id, FREE_CREDIT_AFTER_JOIN)
+            await query.edit_message_text("✅ Verified! You received free credit.\n\nPress /start again.")
+        else:
+            await query.edit_message_text("❌ You still haven't joined the channel.")
+        return ConversationHandler.END
+
     if data == "finger":
         if get_credit(user_id) <= 0:
-            await query.edit_message_text("❌ তোমার credit শেষ। Admin-কে বলো।")
+            keyboard = [[InlineKeyboardButton("💬 Contact Admin", url=ADMIN_LINK)]]
+            await query.edit_message_text(
+                "❌ Your credit is finished.\n\nContact admin to buy more credits.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
             return ConversationHandler.END
+
         await query.edit_message_text(
             "✋ Finger Verify\n\n"
-            "একটা পরিষ্কার ছবি পাঠাও।\n"
-            "পরের ধাপে hand sign বেছে নিবে।"
+            "Send one clear photo of the girl now.\n"
+            "Next you will choose the hand sign."
         )
         return WAITING_PHOTO
 
     elif data == "paper":
-        await query.edit_message_text("📄 Paper Verify\n\nশীঘ্রই আসছে...")
-    
+        await query.edit_message_text("📄 Paper Verify\n\nComing soon...")
     elif data == "voice":
-        await query.edit_message_text("🎤 Voice\n\nশীঘ্রই আসছে...")
-    
+        await query.edit_message_text("🎤 Voice\n\nComing soon...")
     elif data == "credit":
         bal = get_credit(user_id)
-        await query.edit_message_text(f"💰 তোমার Credit: {bal}")
-    
+        await query.edit_message_text(f"💰 Your Credit: {bal}")
     elif data == "website":
-        await query.edit_message_text("🌐 Website\n\nশীঘ্রই আসছে...")
+        await query.edit_message_text("🌐 Website\n\nComing soon...")
 
     return ConversationHandler.END
 
+# ================== RECEIVE PHOTO ==================
 async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    
+
     if get_credit(user_id) <= 0:
-        await update.message.reply_text("❌ Credit শেষ।")
+        keyboard = [[InlineKeyboardButton("💬 Contact Admin", url=ADMIN_LINK)]]
+        await update.message.reply_text(
+            "❌ Your credit is finished.\nContact admin.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return ConversationHandler.END
 
     photo = update.message.photo[-1]
@@ -126,20 +173,18 @@ async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💋 Finger on Lips", callback_data="sign_lips")],
         [InlineKeyboardButton("🤏 Pinching", callback_data="sign_pinch")],
         [InlineKeyboardButton("🖕 Middle Finger", callback_data="sign_middle")],
-        [InlineKeyboardButton("🤝 Handshake Pose", callback_data="sign_handshake")],
+        [InlineKeyboardButton("🤝 Handshake", callback_data="sign_handshake")],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.message.reply_text(
-        "Hand sign বেছে নাও:",
-        reply_markup=reply_markup
+        "Choose the hand sign:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return WAITING_SIGN
 
+# ================== PROCESS SIGN ==================
 async def process_sign(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
     user_id = query.from_user.id
     sign = query.data.replace("sign_", "")
 
@@ -166,10 +211,14 @@ async def process_sign(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = sign_map.get(sign, "three fingers")
 
     if not use_credit(user_id):
-        await query.edit_message_text("❌ Credit শেষ।")
+        keyboard = [[InlineKeyboardButton("💬 Contact Admin", url=ADMIN_LINK)]]
+        await query.edit_message_text(
+            "❌ Credit finished.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return ConversationHandler.END
 
-    await query.edit_message_text("⏳ Grok প্রসেসিং চলছে...")
+    await query.edit_message_text("⏳ Processing with Grok... Please wait.")
 
     try:
         file = await context.bot.get_file(context.user_data["photo_id"])
@@ -182,7 +231,7 @@ async def process_sign(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Exact same face, eyes, nose, lips, hair, skin, body, clothes, background and lighting. "
             f"Do not change the identity at all. "
             f"Only change the hand pose to show: {caption}. "
-            f"Natural realistic hand, correct fingers, photorealistic."
+            f"Natural realistic hand, correct fingers, photorealistic, high quality."
         )
 
         headers = {
@@ -227,9 +276,10 @@ async def process_sign(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
+# ================== ADMIN COMMAND ==================
 async def addcredit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != OWNER_ID:
-        await update.message.reply_text("❌ শুধু Admin পারবে।")
+        await update.message.reply_text("❌ Only Admin can use this.")
         return
 
     try:
@@ -237,10 +287,14 @@ async def addcredit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = int(args[0])
         amount = int(args[1])
         add_credit(user_id, amount)
-        await update.message.reply_text(f"✅ {user_id} কে {amount} credit দেওয়া হয়েছে।\nএখন আছে: {get_credit(user_id)}")
+        await update.message.reply_text(
+            f"✅ Added {amount} credit to {user_id}\n"
+            f"Now balance: {get_credit(user_id)}"
+        )
     except:
         await update.message.reply_text("Usage: /addcredit user_id amount")
 
+# ================== MAIN ==================
 def main():
     app = Application.builder().token(TOKEN).build()
 
@@ -258,7 +312,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(conv)
 
-    print("Bot started...")
+    print("Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
