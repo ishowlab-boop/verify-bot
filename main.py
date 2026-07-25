@@ -133,6 +133,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
+    # Force end any previous conversation state
+    context.user_data.clear()
+
     if text == "✋ Finger Verify":
         if get_credit(user_id) <= 0:
             await update.message.reply_text("❌ Credit finished.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Contact Admin", url=ADMIN_LINK)]]))
@@ -204,22 +207,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Main Menu", reply_markup=main_keyboard())
 
 async def admin_receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        target_id = int(update.message.text.strip().split()[0])
-        context.user_data["target_id"] = target_id
-        keyboard = [
-            [KeyboardButton("➕ Add Credits"), KeyboardButton("➖ Remove Credits")],
-            [KeyboardButton("📅 Set Validity")],
-            [KeyboardButton("🔙 Back")]
-        ]
-        await update.message.reply_text(
-            f"User {target_id}\nChoose action:",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        )
-        return ADMIN_WAIT_ACTION
-    except:
+    text = update.message.text.strip()
+    if not text.isdigit():
         await update.message.reply_text("Invalid ID. Send only the number.")
         return ADMIN_WAIT_ID
+
+    target_id = int(text)
+    context.user_data["target_id"] = target_id
+    keyboard = [
+        [KeyboardButton("➕ Add Credits"), KeyboardButton("➖ Remove Credits")],
+        [KeyboardButton("📅 Set Validity")],
+        [KeyboardButton("🔙 Back")]
+    ]
+    await update.message.reply_text(
+        f"User {target_id}\nChoose action:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+    return ADMIN_WAIT_ACTION
 
 async def admin_receive_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -361,7 +365,8 @@ def main():
             ADMIN_WAIT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_amount)],
             ADMIN_WAIT_VALIDITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_validity)],
         },
-        fallbacks=[MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)],
+        fallbacks=[MessageHandler(filters.TEXT, handle_message)],
+        allow_reentry=True
     )
 
     app.add_handler(CommandHandler("start", start))
