@@ -14,7 +14,7 @@ from telegram.ext import (
 TOKEN = os.getenv("BOT_TOKEN")
 XAI_API_KEY = os.getenv("XAI_API_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
-CHANNEL_USERNAME = "ariyanvoice"
+CHANNEL_USERNAME = "PoseCore"
 ADMIN_LINK = "https://t.me/AriyanInfo"
 CREDITS_FILE = "credits.json"
 USERS_FILE = "users.json"
