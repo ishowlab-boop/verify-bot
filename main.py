@@ -4,7 +4,7 @@ import os
 import base64
 import json
 import requests
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, BotCommand
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes, ConversationHandler
@@ -160,7 +160,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Use: /addcredit user_id amount")
 
     elif text == "List Users" and user_id == OWNER_ID:
-        await update.message.reply_text(f"📊 Total Users: {len(load_users())}")
+        users = load_users()
+        if not users:
+            await update.message.reply_text("No users yet.")
+            return
+        msg = "📊 User List (Last 30):\n\n"
+        for uid in users[-30:]:
+            msg += f"`{uid}`\n"
+        await update.message.reply_text(msg, parse_mode="Markdown")
 
     elif text == "Stats" and user_id == OWNER_ID:
         await update.message.reply_text(f"📊 Active Users: {len(load_users())}")
@@ -274,8 +281,14 @@ async def addcredit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await update.message.reply_text("Usage: /addcredit user_id amount")
 
+async def post_init(app: Application):
+    await app.bot.set_my_commands([
+        BotCommand("start", "Start the bot"),
+        BotCommand("admin", "Admin Panel"),
+    ])
+
 def main():
-    app = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(TOKEN).post_init(post_init).build()
 
     conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^✋ Finger Verify$"), handle_message)],
