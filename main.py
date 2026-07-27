@@ -24,7 +24,6 @@ CREDITS_FILE = "credits.json"
 VIDEO_CREDITS_FILE = "video_credits.json"
 USERS_FILE = "users.json"
 VALIDITY_FILE = "validity.json"
-FREE_CREDIT_AFTER_JOIN = 1
 
 WAITING_PHOTO = 1
 WAITING_PAPER = 2
@@ -137,9 +136,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
-
-    if str(user.id) not in load_json(CREDITS_FILE):
-        add_credit(user.id, FREE_CREDIT_AFTER_JOIN)
 
     await update.message.reply_text(
         "👋 Welcome to PoseCore Bot\n\nChoose an option from the menu below:",
@@ -338,8 +334,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     if query.data == "check_join":
         if await is_joined(context, query.from_user.id):
-            if str(query.from_user.id) not in load_json(CREDITS_FILE):
-                add_credit(query.from_user.id, FREE_CREDIT_AFTER_JOIN)
             await query.edit_message_text("✅ Verified! Press /start again.")
         else:
             keyboard = [
@@ -456,7 +450,6 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Video Credit finished.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    # Dynamic duration based on text length
     word_count = len(caption.split())
     duration = min(12, max(4, word_count // 2 + 3))
 
@@ -473,8 +466,9 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Keep 100% identical face, hair, body, clothes, background and lighting. "
             f"Do not change her appearance at all. "
             f"The girl must clearly and naturally speak or perform exactly this: \"{caption}\". "
-            f"Her mouth movement and voice must match the words precisely. "
-            f"Natural realistic female voice, clear pronunciation, natural expression, smooth movement. "
+            f"Her mouth movement must perfectly match the words. "
+            f"Use a highly natural, realistic human female voice - soft, clear, emotional, and completely human-like. "
+            f"No robotic tone. Natural breathing, natural pauses, natural intonation. "
             f"Photorealistic, high quality."
         )
 
