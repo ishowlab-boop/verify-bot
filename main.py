@@ -211,11 +211,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users = load_users()
         credits = load_json(CREDITS_FILE)
         vcredits = load_json(VIDEO_CREDITS_FILE)
+        validity = load_json(VALIDITY_FILE)
         msg = "Send User ID for credits:\n\n"
         for uid, uname in list(users.items())[-12:]:
             bal = credits.get(uid, 0)
             vbal = vcredits.get(uid, 0)
-            msg += f"{uid} @{uname} | Img:{bal} Vid:{vbal}\n"
+            val = validity.get(uid, "None")
+            msg += f"{uid} @{uname}\nImg:{bal} | Vid:{vbal} | Val:{val}\n\n"
         await update.message.reply_text(msg)
         return ADMIN_WAIT_ID
 
@@ -223,24 +225,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users = load_users()
         credits = load_json(CREDITS_FILE)
         vcredits = load_json(VIDEO_CREDITS_FILE)
+        validity = load_json(VALIDITY_FILE)
         msg = "📊 User List:\n\n"
         for uid, uname in list(users.items())[-30:]:
             bal = credits.get(uid, 0)
             vbal = vcredits.get(uid, 0)
-            msg += f"{uid} @{uname} | Img:{bal} Vid:{vbal}\n"
+            val = validity.get(uid, "None")
+            msg += f"{uid} @{uname}\nImg:{bal} | Vid:{vbal} | Val:{val}\n\n"
         await update.message.reply_text(msg)
 
     elif text == "List Premium Users" and user_id == OWNER_ID:
         users = load_users()
         credits = load_json(CREDITS_FILE)
         vcredits = load_json(VIDEO_CREDITS_FILE)
+        validity = load_json(VALIDITY_FILE)
         msg = "⭐ Premium Users:\n\n"
         for uid in set(list(credits.keys()) + list(vcredits.keys())):
             bal = credits.get(uid, 0)
             vbal = vcredits.get(uid, 0)
             if bal > 0 or vbal > 0:
                 uname = users.get(uid, "unknown")
-                msg += f"{uid} @{uname} | Img:{bal} Vid:{vbal}\n"
+                val = validity.get(uid, "None")
+                msg += f"{uid} @{uname}\nImg:{bal} | Vid:{vbal} | Val:{val}\n\n"
         await update.message.reply_text(msg if msg != "⭐ Premium Users:\n\n" else "No premium users.")
 
     elif text == "Stats" and user_id == OWNER_ID:
@@ -450,7 +456,11 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Video Credit finished.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    status_msg = await update.message.reply_text("⏳ Generating video (max 12s)... Please wait 1-3 minutes.")
+    # Dynamic duration based on text length
+    word_count = len(caption.split())
+    duration = min(12, max(4, word_count // 2 + 3))
+
+    status_msg = await update.message.reply_text(f"⏳ Generating video (~{duration}s)... Please wait 1-3 minutes.")
 
     try:
         photo = update.message.photo[-1]
@@ -465,7 +475,7 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"The girl must clearly and naturally speak or perform exactly this: \"{caption}\". "
             f"Her mouth movement and voice must match the words precisely. "
             f"Natural realistic female voice, clear pronunciation, natural expression, smooth movement. "
-            f"Photorealistic, high quality, duration under 12 seconds."
+            f"Photorealistic, high quality."
         )
 
         headers = {
@@ -480,7 +490,7 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "model": "grok-imagine-video-1.5",
                 "prompt": prompt,
                 "image": {"url": data_uri},
-                "duration": 12,
+                "duration": duration,
                 "resolution": "720p"
             },
             timeout=30
@@ -528,7 +538,7 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         video_data = requests.get(video_url, timeout=60).content
         await update.message.reply_video(
             video=BytesIO(video_data),
-            caption=f"✅ Video Ready!\nPrompt: {caption}\nVideo Credit Left: {get_video_credit(user_id)}",
+            caption=f"✅ Video Ready!\nPrompt: {caption}\nDuration: ~{duration}s\nVideo Credit Left: {get_video_credit(user_id)}",
             supports_streaming=True
         )
         await status_msg.delete()
