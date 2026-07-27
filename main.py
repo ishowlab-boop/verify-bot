@@ -24,6 +24,7 @@ VALIDITY_FILE = "validity.json"
 FREE_CREDIT_AFTER_JOIN = 1
 
 WAITING_PHOTO = 1
+WAITING_VIDEO = 2
 ADMIN_WAIT_ID = 3
 ADMIN_WAIT_AMOUNT = 4
 ADMIN_WAIT_ACTION = 5
@@ -86,8 +87,9 @@ async def is_joined(context, user_id):
 def main_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("✋ Finger Verify"), KeyboardButton("📄 Paper Verify")],
-        [KeyboardButton("🎤 Voice"), KeyboardButton("💰 My Credit")],
-        [KeyboardButton("🌐 Website"), KeyboardButton("📞 Contact Admin")],
+        [KeyboardButton("🎥 Video Verify"), KeyboardButton("🎤 Voice")],
+        [KeyboardButton("💰 My Credit"), KeyboardButton("🌐 Website")],
+        [KeyboardButton("📞 Contact Admin")],
     ], resize_keyboard=True)
 
 def admin_keyboard():
@@ -132,8 +134,6 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
-
-    # Force end any previous conversation state
     context.user_data.clear()
 
     if text == "✋ Finger Verify":
@@ -145,6 +145,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Cancel")]], resize_keyboard=True)
         )
         return WAITING_PHOTO
+
+    elif text == "🎥 Video Verify":
+        if get_credit(user_id) <= 0:
+            await update.message.reply_text("❌ Credit finished.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Contact Admin", url=ADMIN_LINK)]]))
+            return
+        await update.message.reply_text(
+            "🎥 Video Verify\n\nSend one clear photo + caption (what the girl should say or do)\nMax 12 seconds video.\nPress Cancel to go back.",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Cancel")]], resize_keyboard=True)
+        )
+        return WAITING_VIDEO
 
     elif text == "📄 Paper Verify":
         await update.message.reply_text("📄 Paper Verify\n\nSend one clear photo + caption.")
@@ -341,6 +351,61 @@ async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
+async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    caption = update.message.caption or "the girl is smiling and waving"
+
+    if get_credit(user_id) <= 0:
+        await update.message.reply_text("❌ Credit finished.", reply_markup=main_keyboard())
+        return ConversationHandler.END
+
+    if not use_credit(user_id):
+        await update.message.reply_text("❌ Credit finished.", reply_markup=main_keyboard())
+        return ConversationHandler.END
+
+    await update.message.reply_text("⏳ Generating video (max 12s)... Please wait.")
+
+    try:
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        image_bytes = await file.download_as_bytearray()
+        data_uri = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
+
+        prompt = (
+            f"Keep the exact same girl from the reference image. "
+            f"Exact same face, hair, body, clothes, background. "
+            f"Make a short realistic video where: {caption}. "
+            f"Natural movement, photorealistic, high quality, duration under 12 seconds."
+        )
+
+        # Note: xAI video generation endpoint may change. Using image edit as fallback for now.
+        response = requests.post(
+            "https://api.x.ai/v1/images/edits",
+            headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "grok-imagine-image-quality", "prompt": prompt, "image": {"url": data_uri, "type": "image_url"}},
+            timeout=180
+        )
+
+        if response.status_code != 200:
+            add_credit(user_id, 1)
+            await update.message.reply_text(f"Video generation error: {response.text}\n\n(Note: Full video API may not be available yet)", reply_markup=main_keyboard())
+            return ConversationHandler.END
+
+        # For now it will return image. When video API is ready, change this part.
+        img_url = response.json()["data"][0]["url"]
+        img_data = requests.get(img_url).content
+        await update.message.reply_photo(
+            photo=BytesIO(img_data),
+            caption=f"✅ Generated (Image fallback)\nPrompt: {caption}\nRemaining: {get_credit(user_id)}"
+        )
+        await update.message.reply_text("Menu:", reply_markup=main_keyboard())
+
+    except Exception as e:
+        add_credit(user_id, 1)
+        await update.message.reply_text(f"Error: {e}", reply_markup=main_keyboard())
+
+    return ConversationHandler.END
+
 async def post_init(app: Application):
     await app.bot.set_my_commands([
         BotCommand("start", "Start the bot"),
@@ -353,11 +418,16 @@ def main():
     conv = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Regex("^✋ Finger Verify$"), handle_message),
+            MessageHandler(filters.Regex("^🎥 Video Verify$"), handle_message),
             MessageHandler(filters.Regex("^Manage Credits$"), handle_message),
         ],
         states={
             WAITING_PHOTO: [
                 MessageHandler(filters.PHOTO, receive_photo),
+                MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)
+            ],
+            WAITING_VIDEO: [
+                MessageHandler(filters.PHOTO, receive_video),
                 MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)
             ],
             ADMIN_WAIT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_receive_id)],
