@@ -3,6 +3,7 @@ from io import BytesIO
 import os
 import base64
 import json
+import time
 import requests
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, BotCommand
@@ -151,7 +152,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Credit finished.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Contact Admin", url=ADMIN_LINK)]]))
             return
         await update.message.reply_text(
-            "🎥 Video Verify\n\nSend one clear photo + caption (what the girl should say or do)\nMax 12 seconds video.\nPress Cancel to go back.",
+            "🎥 Video Verify\n\nSend one clear photo + caption (what the girl should do/say)\nMax 12 seconds video.\nPress Cancel to go back.",
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Cancel")]], resize_keyboard=True)
         )
         return WAITING_VIDEO
@@ -353,7 +354,7 @@ async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    caption = update.message.caption or "the girl is smiling and waving"
+    caption = update.message.caption or "the girl is smiling and looking at the camera"
 
     if get_credit(user_id) <= 0:
         await update.message.reply_text("❌ Credit finished.", reply_markup=main_keyboard())
@@ -363,7 +364,7 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Credit finished.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    await update.message.reply_text("⏳ Generating video (max 12s)... Please wait.")
+    status_msg = await update.message.reply_text("⏳ Generating video (max 12s)... Please wait. This may take 1-3 minutes.")
 
     try:
         photo = update.message.photo[-1]
@@ -373,36 +374,83 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         prompt = (
             f"Keep the exact same girl from the reference image. "
-            f"Exact same face, hair, body, clothes, background. "
-            f"Make a short realistic video where: {caption}. "
-            f"Natural movement, photorealistic, high quality, duration under 12 seconds."
+            f"Exact same face, hair, body, clothes and background. "
+            f"Animate naturally: {caption}. "
+            f"Photorealistic, smooth natural movement, high quality."
         )
 
-        # Note: xAI video generation endpoint may change. Using image edit as fallback for now.
+        headers = {
+            "Authorization": f"Bearer {XAI_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        # Start video generation
         response = requests.post(
-            "https://api.x.ai/v1/images/edits",
-            headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "grok-imagine-image-quality", "prompt": prompt, "image": {"url": data_uri, "type": "image_url"}},
-            timeout=180
+            "https://api.x.ai/v1/videos/generations",
+            headers=headers,
+            json={
+                "model": "grok-imagine-video-1.5",
+                "prompt": prompt,
+                "image": {"url": data_uri},
+                "duration": 12,
+                "resolution": "720p"
+            },
+            timeout=30
         )
 
         if response.status_code != 200:
             add_credit(user_id, 1)
-            await update.message.reply_text(f"Video generation error: {response.text}\n\n(Note: Full video API may not be available yet)", reply_markup=main_keyboard())
+            await status_msg.edit_text(f"❌ Error starting video: {response.text}")
+            await update.message.reply_text("Menu:", reply_markup=main_keyboard())
             return ConversationHandler.END
 
-        # For now it will return image. When video API is ready, change this part.
-        img_url = response.json()["data"][0]["url"]
-        img_data = requests.get(img_url).content
-        await update.message.reply_photo(
-            photo=BytesIO(img_data),
-            caption=f"✅ Generated (Image fallback)\nPrompt: {caption}\nRemaining: {get_credit(user_id)}"
+        request_id = response.json().get("request_id")
+        if not request_id:
+            add_credit(user_id, 1)
+            await status_msg.edit_text("❌ No request_id received.")
+            await update.message.reply_text("Menu:", reply_markup=main_keyboard())
+            return ConversationHandler.END
+
+        # Poll for completion
+        video_url = None
+        for _ in range(60):  # max ~5 minutes
+            time.sleep(5)
+            poll = requests.get(
+                f"https://api.x.ai/v1/videos/{request_id}",
+                headers={"Authorization": f"Bearer {XAI_API_KEY}"},
+                timeout=30
+            )
+            data = poll.json()
+            status = data.get("status")
+
+            if status == "done":
+                video_url = data.get("video", {}).get("url") or data.get("url")
+                break
+            elif status in ["failed", "expired"]:
+                add_credit(user_id, 1)
+                await status_msg.edit_text(f"❌ Video generation failed: {data}")
+                await update.message.reply_text("Menu:", reply_markup=main_keyboard())
+                return ConversationHandler.END
+
+        if not video_url:
+            add_credit(user_id, 1)
+            await status_msg.edit_text("❌ Timeout. Video not ready.")
+            await update.message.reply_text("Menu:", reply_markup=main_keyboard())
+            return ConversationHandler.END
+
+        # Download and send video
+        video_data = requests.get(video_url, timeout=60).content
+        await update.message.reply_video(
+            video=BytesIO(video_data),
+            caption=f"✅ Video Ready!\nPrompt: {caption}\nRemaining Credit: {get_credit(user_id)}",
+            supports_streaming=True
         )
+        await status_msg.delete()
         await update.message.reply_text("Menu:", reply_markup=main_keyboard())
 
     except Exception as e:
         add_credit(user_id, 1)
-        await update.message.reply_text(f"Error: {e}", reply_markup=main_keyboard())
+        await update.message.reply_text(f"❌ Error: {e}", reply_markup=main_keyboard())
 
     return ConversationHandler.END
 
