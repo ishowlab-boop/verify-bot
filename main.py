@@ -19,17 +19,20 @@ CHANNEL_USERNAME = "PoseCore"
 ADMIN_LINK = "https://t.me/lindaariyan"
 WEBSITE_LINK = "https://modelboxbd.com"
 VOICE_LINK = "https://t.me/ariyanvoice"
+
 CREDITS_FILE = "credits.json"
+VIDEO_CREDITS_FILE = "video_credits.json"
 USERS_FILE = "users.json"
 VALIDITY_FILE = "validity.json"
 FREE_CREDIT_AFTER_JOIN = 1
 
 WAITING_PHOTO = 1
-WAITING_VIDEO = 2
-ADMIN_WAIT_ID = 3
-ADMIN_WAIT_AMOUNT = 4
-ADMIN_WAIT_ACTION = 5
-ADMIN_WAIT_VALIDITY = 6
+WAITING_PAPER = 2
+WAITING_VIDEO = 3
+ADMIN_WAIT_ID = 4
+ADMIN_WAIT_AMOUNT = 5
+ADMIN_WAIT_ACTION = 6
+ADMIN_WAIT_VALIDITY = 7
 
 logging.basicConfig(level=logging.INFO)
 
@@ -47,10 +50,18 @@ def save_json(file, data):
 def get_credit(user_id):
     return load_json(CREDITS_FILE).get(str(user_id), 0)
 
+def get_video_credit(user_id):
+    return load_json(VIDEO_CREDITS_FILE).get(str(user_id), 0)
+
 def add_credit(user_id, amount):
     data = load_json(CREDITS_FILE)
     data[str(user_id)] = max(0, data.get(str(user_id), 0) + amount)
     save_json(CREDITS_FILE, data)
+
+def add_video_credit(user_id, amount):
+    data = load_json(VIDEO_CREDITS_FILE)
+    data[str(user_id)] = max(0, data.get(str(user_id), 0) + amount)
+    save_json(VIDEO_CREDITS_FILE, data)
 
 def use_credit(user_id):
     data = load_json(CREDITS_FILE)
@@ -58,6 +69,15 @@ def use_credit(user_id):
     if data.get(uid, 0) > 0:
         data[uid] -= 1
         save_json(CREDITS_FILE, data)
+        return True
+    return False
+
+def use_video_credit(user_id):
+    data = load_json(VIDEO_CREDITS_FILE)
+    uid = str(user_id)
+    if data.get(uid, 0) > 0:
+        data[uid] -= 1
+        save_json(VIDEO_CREDITS_FILE, data)
         return True
     return False
 
@@ -142,29 +162,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Credit finished.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Contact Admin", url=ADMIN_LINK)]]))
             return
         await update.message.reply_text(
-            "✋ Finger Verify\n\nSend one clear photo + caption (example: two fingers / nose touch)\nPress Cancel to go back.",
+            "✋ Finger Verify\n\nSend one clear photo + caption (example: two fingers / nose touch / thumbs up)\nPress Cancel to go back.",
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Cancel")]], resize_keyboard=True)
         )
         return WAITING_PHOTO
 
-    elif text == "🎥 Video Verify":
+    elif text == "📄 Paper Verify":
         if get_credit(user_id) <= 0:
             await update.message.reply_text("❌ Credit finished.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Contact Admin", url=ADMIN_LINK)]]))
             return
         await update.message.reply_text(
-            "🎥 Video Verify\n\nSend one clear photo + caption (what the girl should do/say)\nMax 12 seconds video.\nPress Cancel to go back.",
+            "📄 Paper Verify\n\nSend one clear photo + caption\nExample: holding big white paper / holding small paper with text\nPress Cancel to go back.",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Cancel")]], resize_keyboard=True)
+        )
+        return WAITING_PAPER
+
+    elif text == "🎥 Video Verify":
+        if get_video_credit(user_id) <= 0:
+            await update.message.reply_text("❌ Video Credit finished.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Contact Admin", url=ADMIN_LINK)]]))
+            return
+        await update.message.reply_text(
+            "🎥 Video Verify\n\nSend one clear photo + caption (exactly what she should do/say)\nMax 12 seconds.\nPress Cancel to go back.",
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Cancel")]], resize_keyboard=True)
         )
         return WAITING_VIDEO
-
-    elif text == "📄 Paper Verify":
-        await update.message.reply_text("📄 Paper Verify\n\nSend one clear photo + caption.")
 
     elif text == "🎤 Voice":
         await update.message.reply_text("🎤 Voice Feature", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open Voice Channel", url=VOICE_LINK)]]))
 
     elif text == "💰 My Credit":
-        await update.message.reply_text(f"💰 Your Credit: {get_credit(user_id)}\nValidity: {get_validity(user_id)}")
+        await update.message.reply_text(
+            f"💰 Image Credit: {get_credit(user_id)}\n"
+            f"🎥 Video Credit: {get_video_credit(user_id)}\n"
+            f"Validity: {get_validity(user_id)}"
+        )
 
     elif text == "🌐 Website":
         await update.message.reply_text("🌐 Our Website", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open Website", url=WEBSITE_LINK)]]))
@@ -179,34 +210,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "Manage Credits" and user_id == OWNER_ID:
         users = load_users()
         credits = load_json(CREDITS_FILE)
+        vcredits = load_json(VIDEO_CREDITS_FILE)
         msg = "Send User ID for credits:\n\n"
-        for uid, uname in list(users.items())[-15:]:
+        for uid, uname in list(users.items())[-12:]:
             bal = credits.get(uid, 0)
-            msg += f"{uid} @{uname} credits={bal}\n"
+            vbal = vcredits.get(uid, 0)
+            msg += f"{uid} @{uname} | Img:{bal} Vid:{vbal}\n"
         await update.message.reply_text(msg)
         return ADMIN_WAIT_ID
 
     elif text == "List Users" and user_id == OWNER_ID:
         users = load_users()
         credits = load_json(CREDITS_FILE)
+        vcredits = load_json(VIDEO_CREDITS_FILE)
         msg = "📊 User List:\n\n"
         for uid, uname in list(users.items())[-30:]:
             bal = credits.get(uid, 0)
-            msg += f"{uid} @{uname} credits={bal}\n"
+            vbal = vcredits.get(uid, 0)
+            msg += f"{uid} @{uname} | Img:{bal} Vid:{vbal}\n"
         await update.message.reply_text(msg)
 
     elif text == "List Premium Users" and user_id == OWNER_ID:
         users = load_users()
         credits = load_json(CREDITS_FILE)
-        premium = {k: v for k, v in credits.items() if v > 0}
-        if not premium:
-            await update.message.reply_text("No premium users.")
-            return
+        vcredits = load_json(VIDEO_CREDITS_FILE)
         msg = "⭐ Premium Users:\n\n"
-        for uid, bal in premium.items():
-            uname = users.get(uid, "unknown")
-            msg += f"{uid} @{uname} credits={bal}\n"
-        await update.message.reply_text(msg)
+        for uid in set(list(credits.keys()) + list(vcredits.keys())):
+            bal = credits.get(uid, 0)
+            vbal = vcredits.get(uid, 0)
+            if bal > 0 or vbal > 0:
+                uname = users.get(uid, "unknown")
+                msg += f"{uid} @{uname} | Img:{bal} Vid:{vbal}\n"
+        await update.message.reply_text(msg if msg != "⭐ Premium Users:\n\n" else "No premium users.")
 
     elif text == "Stats" and user_id == OWNER_ID:
         await update.message.reply_text(f"📊 Active Users: {len(load_users())}")
@@ -226,7 +261,8 @@ async def admin_receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_id = int(text)
     context.user_data["target_id"] = target_id
     keyboard = [
-        [KeyboardButton("➕ Add Credits"), KeyboardButton("➖ Remove Credits")],
+        [KeyboardButton("➕ Add Image Credit"), KeyboardButton("➕ Add Video Credit")],
+        [KeyboardButton("➖ Remove Image Credit"), KeyboardButton("➖ Remove Video Credit")],
         [KeyboardButton("📅 Set Validity")],
         [KeyboardButton("🔙 Back")]
     ]
@@ -246,7 +282,7 @@ async def admin_receive_action(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("How many days validity?")
         return ADMIN_WAIT_VALIDITY
 
-    context.user_data["action"] = "add" if "Add" in text else "remove"
+    context.user_data["action"] = text
     await update.message.reply_text("How many credits?")
     return ADMIN_WAIT_AMOUNT
 
@@ -256,12 +292,20 @@ async def admin_receive_amount(update: Update, context: ContextTypes.DEFAULT_TYP
         target_id = context.user_data.get("target_id")
         action = context.user_data.get("action")
 
-        if action == "add":
+        if "Add Image" in action:
             add_credit(target_id, amount)
-            msg = f"✅ Added {amount} credits to {target_id}\nNew Balance: {get_credit(target_id)}"
-        else:
+            msg = f"✅ Added {amount} Image Credit to {target_id}\nNew: {get_credit(target_id)}"
+        elif "Add Video" in action:
+            add_video_credit(target_id, amount)
+            msg = f"✅ Added {amount} Video Credit to {target_id}\nNew: {get_video_credit(target_id)}"
+        elif "Remove Image" in action:
             add_credit(target_id, -amount)
-            msg = f"✅ Removed {amount} credits from {target_id}\nNew Balance: {get_credit(target_id)}"
+            msg = f"✅ Removed {amount} Image Credit from {target_id}\nNew: {get_credit(target_id)}"
+        elif "Remove Video" in action:
+            add_video_credit(target_id, -amount)
+            msg = f"✅ Removed {amount} Video Credit from {target_id}\nNew: {get_video_credit(target_id)}"
+        else:
+            msg = "Unknown action"
 
         await update.message.reply_text(msg, reply_markup=admin_keyboard())
         return ConversationHandler.END
@@ -302,15 +346,11 @@ async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     caption = update.message.caption or "three fingers"
 
-    if get_credit(user_id) <= 0:
-        await update.message.reply_text("❌ Credit finished.", reply_markup=main_keyboard())
-        return ConversationHandler.END
-
     if not use_credit(user_id):
         await update.message.reply_text("❌ Credit finished.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    await update.message.reply_text("⏳ Processing...")
+    await update.message.reply_text("⏳ Processing Finger Verify...")
 
     try:
         photo = update.message.photo[-1]
@@ -320,10 +360,10 @@ async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         prompt = (
             f"Keep the exact same girl from the reference image. "
-            f"Exact same face, eyes, nose, lips, hair, skin, body, clothes, background and lighting. "
-            f"Do not change the identity at all. "
-            f"Only change the hand pose to: {caption}. "
-            f"Natural realistic hand, correct fingers, photorealistic, high quality."
+            f"Exact same face, eyes, nose, lips, hair, skin tone, body shape, clothes, background and lighting. "
+            f"Do not change her identity at all. "
+            f"Only change her hand pose to exactly: {caption}. "
+            f"Make the hand natural, realistic fingers, correct proportions. Photorealistic, high quality."
         )
 
         response = requests.post(
@@ -342,7 +382,57 @@ async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         img_data = requests.get(img_url).content
         await update.message.reply_photo(
             photo=BytesIO(img_data),
-            caption=f"✅ Done!\nPrompt: {caption}\nRemaining: {get_credit(user_id)}"
+            caption=f"✅ Finger Verify Done!\nPrompt: {caption}\nRemaining: {get_credit(user_id)}"
+        )
+        await update.message.reply_text("Menu:", reply_markup=main_keyboard())
+
+    except Exception as e:
+        add_credit(user_id, 1)
+        await update.message.reply_text(f"Error: {e}", reply_markup=main_keyboard())
+
+    return ConversationHandler.END
+
+async def receive_paper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    caption = update.message.caption or "holding a white paper"
+
+    if not use_credit(user_id):
+        await update.message.reply_text("❌ Credit finished.", reply_markup=main_keyboard())
+        return ConversationHandler.END
+
+    await update.message.reply_text("⏳ Processing Paper Verify...")
+
+    try:
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        image_bytes = await file.download_as_bytearray()
+        data_uri = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
+
+        prompt = (
+            f"Keep the exact same girl from the reference image. "
+            f"Exact same face, eyes, nose, lips, hair, skin, body, clothes, background and lighting. "
+            f"Do not change her identity. "
+            f"Make her hold a paper as described: {caption}. "
+            f"Paper should look real, correct size as requested, natural hand holding the paper. Photorealistic."
+        )
+
+        response = requests.post(
+            "https://api.x.ai/v1/images/edits",
+            headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "grok-imagine-image-quality", "prompt": prompt, "image": {"url": data_uri, "type": "image_url"}},
+            timeout=120
+        )
+
+        if response.status_code != 200:
+            add_credit(user_id, 1)
+            await update.message.reply_text(f"Error: {response.text}", reply_markup=main_keyboard())
+            return ConversationHandler.END
+
+        img_url = response.json()["data"][0]["url"]
+        img_data = requests.get(img_url).content
+        await update.message.reply_photo(
+            photo=BytesIO(img_data),
+            caption=f"✅ Paper Verify Done!\nPrompt: {caption}\nRemaining: {get_credit(user_id)}"
         )
         await update.message.reply_text("Menu:", reply_markup=main_keyboard())
 
@@ -356,15 +446,11 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     caption = update.message.caption or "the girl is smiling and looking at the camera"
 
-    if get_credit(user_id) <= 0:
-        await update.message.reply_text("❌ Credit finished.", reply_markup=main_keyboard())
+    if not use_video_credit(user_id):
+        await update.message.reply_text("❌ Video Credit finished.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    if not use_credit(user_id):
-        await update.message.reply_text("❌ Credit finished.", reply_markup=main_keyboard())
-        return ConversationHandler.END
-
-    status_msg = await update.message.reply_text("⏳ Generating video (max 12s)... Please wait. This may take 1-3 minutes.")
+    status_msg = await update.message.reply_text("⏳ Generating video (max 12s)... Please wait 1-3 minutes.")
 
     try:
         photo = update.message.photo[-1]
@@ -373,10 +459,10 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data_uri = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
 
         prompt = (
-            f"Keep the exact same girl from the reference image. "
-            f"Exact same face, hair, body, clothes and background. "
-            f"Animate naturally: {caption}. "
-            f"Photorealistic, smooth natural movement, high quality."
+            f"Keep the exact same girl from the reference image with 100% identity match. "
+            f"Same face, hair, body, clothes, background. "
+            f"Strictly follow this instruction exactly: {caption}. "
+            f"Natural realistic movement, natural facial expression, natural voice if speaking, photorealistic, high quality."
         )
 
         headers = {
@@ -384,7 +470,6 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Content-Type": "application/json"
         }
 
-        # Start video generation
         response = requests.post(
             "https://api.x.ai/v1/videos/generations",
             headers=headers,
@@ -399,21 +484,20 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         if response.status_code != 200:
-            add_credit(user_id, 1)
-            await status_msg.edit_text(f"❌ Error starting video: {response.text}")
+            add_video_credit(user_id, 1)
+            await status_msg.edit_text(f"❌ Error: {response.text}")
             await update.message.reply_text("Menu:", reply_markup=main_keyboard())
             return ConversationHandler.END
 
         request_id = response.json().get("request_id")
         if not request_id:
-            add_credit(user_id, 1)
-            await status_msg.edit_text("❌ No request_id received.")
+            add_video_credit(user_id, 1)
+            await status_msg.edit_text("❌ No request_id.")
             await update.message.reply_text("Menu:", reply_markup=main_keyboard())
             return ConversationHandler.END
 
-        # Poll for completion
         video_url = None
-        for _ in range(60):  # max ~5 minutes
+        for _ in range(60):
             time.sleep(5)
             poll = requests.get(
                 f"https://api.x.ai/v1/videos/{request_id}",
@@ -427,29 +511,28 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 video_url = data.get("video", {}).get("url") or data.get("url")
                 break
             elif status in ["failed", "expired"]:
-                add_credit(user_id, 1)
-                await status_msg.edit_text(f"❌ Video generation failed: {data}")
+                add_video_credit(user_id, 1)
+                await status_msg.edit_text(f"❌ Failed: {data}")
                 await update.message.reply_text("Menu:", reply_markup=main_keyboard())
                 return ConversationHandler.END
 
         if not video_url:
-            add_credit(user_id, 1)
-            await status_msg.edit_text("❌ Timeout. Video not ready.")
+            add_video_credit(user_id, 1)
+            await status_msg.edit_text("❌ Timeout.")
             await update.message.reply_text("Menu:", reply_markup=main_keyboard())
             return ConversationHandler.END
 
-        # Download and send video
         video_data = requests.get(video_url, timeout=60).content
         await update.message.reply_video(
             video=BytesIO(video_data),
-            caption=f"✅ Video Ready!\nPrompt: {caption}\nRemaining Credit: {get_credit(user_id)}",
+            caption=f"✅ Video Ready!\nPrompt: {caption}\nVideo Credit Left: {get_video_credit(user_id)}",
             supports_streaming=True
         )
         await status_msg.delete()
         await update.message.reply_text("Menu:", reply_markup=main_keyboard())
 
     except Exception as e:
-        add_credit(user_id, 1)
+        add_video_credit(user_id, 1)
         await update.message.reply_text(f"❌ Error: {e}", reply_markup=main_keyboard())
 
     return ConversationHandler.END
@@ -466,12 +549,17 @@ def main():
     conv = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Regex("^✋ Finger Verify$"), handle_message),
+            MessageHandler(filters.Regex("^📄 Paper Verify$"), handle_message),
             MessageHandler(filters.Regex("^🎥 Video Verify$"), handle_message),
             MessageHandler(filters.Regex("^Manage Credits$"), handle_message),
         ],
         states={
             WAITING_PHOTO: [
                 MessageHandler(filters.PHOTO, receive_photo),
+                MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)
+            ],
+            WAITING_PAPER: [
+                MessageHandler(filters.PHOTO, receive_paper),
                 MessageHandler(filters.Regex("^❌ Cancel$"), handle_message)
             ],
             WAITING_VIDEO: [
