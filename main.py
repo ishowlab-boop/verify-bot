@@ -122,6 +122,10 @@ def admin_keyboard():
         [KeyboardButton("Back to Menu")]
     ], resize_keyboard=True)
 
+def is_balance_error(text):
+    text = text.lower()
+    return any(x in text for x in ["insufficient", "quota", "billing", "payment required", "402", "credit", "balance"])
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id, user.username)
@@ -375,7 +379,11 @@ async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if response.status_code != 200:
             add_credit(user_id, 1)
-            await update.message.reply_text(f"Error: {response.text}", reply_markup=main_keyboard())
+            err = response.text
+            if is_balance_error(err):
+                await update.message.reply_text("❌ Official bot credit Finished. Please contact Admin.", reply_markup=main_keyboard())
+            else:
+                await update.message.reply_text(f"Error: {err}", reply_markup=main_keyboard())
             return ConversationHandler.END
 
         img_url = response.json()["data"][0]["url"]
@@ -425,7 +433,11 @@ async def receive_paper(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if response.status_code != 200:
             add_credit(user_id, 1)
-            await update.message.reply_text(f"Error: {response.text}", reply_markup=main_keyboard())
+            err = response.text
+            if is_balance_error(err):
+                await update.message.reply_text("❌ Official bot credit Finished. Please contact Admin.", reply_markup=main_keyboard())
+            else:
+                await update.message.reply_text(f"Error: {err}", reply_markup=main_keyboard())
             return ConversationHandler.END
 
         img_url = response.json()["data"][0]["url"]
@@ -492,14 +504,18 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if response.status_code != 200:
             add_video_credit(user_id, 1)
-            await status_msg.edit_text(f"❌ Error: {response.text}")
+            err = response.text
+            if is_balance_error(err):
+                await status_msg.edit_text("❌ Official bot credit Finished. Please contact Admin.")
+            else:
+                await status_msg.edit_text(f"❌ Error: {err}")
             await update.message.reply_text("Menu:", reply_markup=main_keyboard())
             return ConversationHandler.END
 
         request_id = response.json().get("request_id")
         if not request_id:
             add_video_credit(user_id, 1)
-            await status_msg.edit_text("❌ No request_id.")
+            await status_msg.edit_text("❌ Failed to start.")
             await update.message.reply_text("Menu:", reply_markup=main_keyboard())
             return ConversationHandler.END
 
@@ -519,7 +535,7 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
             elif status in ["failed", "expired"]:
                 add_video_credit(user_id, 1)
-                await status_msg.edit_text(f"❌ Failed: {data}")
+                await status_msg.edit_text("❌ Failed.")
                 await update.message.reply_text("Menu:", reply_markup=main_keyboard())
                 return ConversationHandler.END
 
