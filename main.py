@@ -459,10 +459,13 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data_uri = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
 
         prompt = (
-            f"Keep the exact same girl from the reference image with 100% identity match. "
-            f"Same face, hair, body, clothes, background. "
-            f"Strictly follow this instruction exactly: {caption}. "
-            f"Natural realistic movement, natural facial expression, natural voice if speaking, photorealistic, high quality."
+            f"Use the exact same girl from the reference image. "
+            f"Keep 100% identical face, hair, body, clothes, background and lighting. "
+            f"Do not change her appearance at all. "
+            f"The girl must clearly and naturally speak or perform exactly this: \"{caption}\". "
+            f"Her mouth movement and voice must match the words precisely. "
+            f"Natural realistic female voice, clear pronunciation, natural expression, smooth movement. "
+            f"Photorealistic, high quality, duration under 12 seconds."
         )
 
         headers = {
