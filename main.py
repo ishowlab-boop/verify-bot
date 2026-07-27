@@ -18,7 +18,8 @@ OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 CHANNEL_USERNAME = "PoseCore"
 ADMIN_LINK = "https://t.me/lindaariyan"
 WEBSITE_LINK = "https://modelboxbd.com"
-VOICE_LINK = "https://t.me/ariyanvoice"
+VOICE_BOT = "https://t.me/realvoi_bot"
+OFFICIAL_CHANNEL = "https://t.me/PoseCore"
 
 CREDITS_FILE = "credits.json"
 VIDEO_CREDITS_FILE = "video_credits.json"
@@ -141,10 +142,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Welcome with User ID + buttons
+    share_text = f"Check out this amazing bot!\nhttps://t.me/{context.bot.username}"
+    keyboard = [
+        [InlineKeyboardButton("🎤 Voice Bot", url=VOICE_BOT)],
+        [InlineKeyboardButton("📢 Official Channel", url=OFFICIAL_CHANNEL)],
+        [InlineKeyboardButton("📤 Share with Friends", url=f"https://t.me/share/url?url={share_text}")]
+    ]
+
     await update.message.reply_text(
-        "👋 Welcome to PoseCore Bot\n\nChoose an option from the menu below:",
-        reply_markup=main_keyboard()
+        f"👋 Welcome to PoseCore Bot\n\n"
+        f"Your User ID: `{user.id}`\n\n"
+        f"Choose an option from the menu below:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
     )
+    await update.message.reply_text("Main Menu:", reply_markup=main_keyboard())
 
 async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
@@ -188,7 +201,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return WAITING_VIDEO
 
     elif text == "🎤 Voice":
-        await update.message.reply_text("🎤 Voice Feature", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open Voice Channel", url=VOICE_LINK)]]))
+        await update.message.reply_text("🎤 Voice Feature", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open Voice Bot", url=VOICE_BOT)]]))
 
     elif text == "💰 My Credit":
         await update.message.reply_text(
