@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 
 TOKEN = os.getenv("BOT_TOKEN")
-XAI_API_KEY = os.getenv("XAI_API_KEY")
+FAL_KEY = os.getenv("FAL_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 CHANNEL_USERNAME = "PoseCore"
 ADMIN_LINK = "https://t.me/lindaariyan"
@@ -124,8 +124,8 @@ def admin_keyboard():
     ], resize_keyboard=True)
 
 def is_balance_error(text):
-    text = text.lower()
-    return any(x in text for x in ["insufficient", "quota", "billing", "payment required", "402", "credit", "balance"])
+    text = str(text).lower()
+    return any(x in text for x in ["insufficient", "quota", "billing", "payment", "credit", "balance", "402"])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -142,7 +142,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Welcome with User ID + buttons
     share_text = f"Check out this amazing bot!\nhttps://t.me/{context.bot.username}"
     keyboard = [
         [InlineKeyboardButton("🎤 Voice Bot", url=VOICE_BOT)],
@@ -383,10 +382,18 @@ async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Make the hand natural, realistic fingers, correct proportions. Photorealistic, high quality."
         )
 
+        headers = {
+            "Authorization": f"Key {FAL_KEY}",
+            "Content-Type": "application/json"
+        }
+
         response = requests.post(
-            "https://api.x.ai/v1/images/edits",
-            headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "grok-imagine-image-quality", "prompt": prompt, "image": {"url": data_uri, "type": "image_url"}},
+            "https://fal.run/fal-ai/flux-pro/kontext",
+            headers=headers,
+            json={
+                "prompt": prompt,
+                "image_url": data_uri
+            },
             timeout=120
         )
 
@@ -399,7 +406,13 @@ async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"Error: {err}", reply_markup=main_keyboard())
             return ConversationHandler.END
 
-        img_url = response.json()["data"][0]["url"]
+        result = response.json()
+        img_url = result.get("images", [{}])[0].get("url") or result.get("image", {}).get("url")
+        if not img_url:
+            add_credit(user_id, 1)
+            await update.message.reply_text("❌ No image returned.", reply_markup=main_keyboard())
+            return ConversationHandler.END
+
         img_data = requests.get(img_url).content
         await update.message.reply_photo(
             photo=BytesIO(img_data),
@@ -437,10 +450,18 @@ async def receive_paper(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Paper should look real, correct size as requested, natural hand holding the paper. Photorealistic."
         )
 
+        headers = {
+            "Authorization": f"Key {FAL_KEY}",
+            "Content-Type": "application/json"
+        }
+
         response = requests.post(
-            "https://api.x.ai/v1/images/edits",
-            headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "grok-imagine-image-quality", "prompt": prompt, "image": {"url": data_uri, "type": "image_url"}},
+            "https://fal.run/fal-ai/flux-pro/kontext",
+            headers=headers,
+            json={
+                "prompt": prompt,
+                "image_url": data_uri
+            },
             timeout=120
         )
 
@@ -453,7 +474,13 @@ async def receive_paper(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"Error: {err}", reply_markup=main_keyboard())
             return ConversationHandler.END
 
-        img_url = response.json()["data"][0]["url"]
+        result = response.json()
+        img_url = result.get("images", [{}])[0].get("url") or result.get("image", {}).get("url")
+        if not img_url:
+            add_credit(user_id, 1)
+            await update.message.reply_text("❌ No image returned.", reply_markup=main_keyboard())
+            return ConversationHandler.END
+
         img_data = requests.get(img_url).content
         await update.message.reply_photo(
             photo=BytesIO(img_data),
@@ -476,7 +503,7 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     word_count = len(caption.split())
-    duration = min(12, max(4, word_count // 2 + 3))
+    duration = min(12, max(5, word_count // 2 + 3))
 
     status_msg = await update.message.reply_text(f"⏳ Generating video (~{duration}s)... Please wait 1-3 minutes.")
 
@@ -498,19 +525,19 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         headers = {
-            "Authorization": f"Bearer {XAI_API_KEY}",
+            "Authorization": f"Key {FAL_KEY}",
             "Content-Type": "application/json"
         }
 
+        # Kling with native audio
         response = requests.post(
-            "https://api.x.ai/v1/videos/generations",
+            "https://fal.run/fal-ai/kling-video/v2.6/pro/image-to-video",
             headers=headers,
             json={
-                "model": "grok-imagine-video-1.5",
                 "prompt": prompt,
-                "image": {"url": data_uri},
-                "duration": duration,
-                "resolution": "720p"
+                "start_image_url": data_uri,
+                "duration": str(duration),
+                "generate_audio": True
             },
             timeout=30
         )
@@ -525,36 +552,36 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Menu:", reply_markup=main_keyboard())
             return ConversationHandler.END
 
-        request_id = response.json().get("request_id")
-        if not request_id:
-            add_video_credit(user_id, 1)
-            await status_msg.edit_text("❌ Failed to start.")
-            await update.message.reply_text("Menu:", reply_markup=main_keyboard())
-            return ConversationHandler.END
+        result = response.json()
+        # fal queue system - may need polling
+        request_id = result.get("request_id") or result.get("id")
 
-        video_url = None
-        for _ in range(60):
-            time.sleep(5)
-            poll = requests.get(
-                f"https://api.x.ai/v1/videos/{request_id}",
-                headers={"Authorization": f"Bearer {XAI_API_KEY}"},
-                timeout=30
-            )
-            data = poll.json()
-            status = data.get("status")
+        if request_id:
+            video_url = None
+            for _ in range(60):
+                time.sleep(5)
+                poll = requests.get(
+                    f"https://fal.run/fal-ai/kling-video/v2.6/pro/image-to-video/requests/{request_id}/status",
+                    headers={"Authorization": f"Key {FAL_KEY}"},
+                    timeout=30
+                )
+                data = poll.json()
+                status = data.get("status")
 
-            if status == "done":
-                video_url = data.get("video", {}).get("url") or data.get("url")
-                break
-            elif status in ["failed", "expired"]:
-                add_video_credit(user_id, 1)
-                await status_msg.edit_text("❌ Failed.")
-                await update.message.reply_text("Menu:", reply_markup=main_keyboard())
-                return ConversationHandler.END
+                if status == "COMPLETED":
+                    video_url = data.get("video", {}).get("url") or data.get("output", {}).get("video", {}).get("url")
+                    break
+                elif status in ["FAILED", "ERROR"]:
+                    add_video_credit(user_id, 1)
+                    await status_msg.edit_text("❌ Failed.")
+                    await update.message.reply_text("Menu:", reply_markup=main_keyboard())
+                    return ConversationHandler.END
+        else:
+            video_url = result.get("video", {}).get("url")
 
         if not video_url:
             add_video_credit(user_id, 1)
-            await status_msg.edit_text("❌ Timeout.")
+            await status_msg.edit_text("❌ Timeout or no video.")
             await update.message.reply_text("Menu:", reply_markup=main_keyboard())
             return ConversationHandler.END
 
