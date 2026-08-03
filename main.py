@@ -508,7 +508,7 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         duration = "10"
 
-    status_msg = await update.message.reply_text(f"⏳ Generating video (~{duration}s)... Please wait 1-3 minutes.")
+    status_msg = await update.message.reply_text(f"⏳ Generating video (~{duration}s)... Please wait 2-4 minutes.")
 
     try:
         photo = update.message.photo[-1]
@@ -532,8 +532,9 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Content-Type": "application/json"
         }
 
+        # Submit to fal queue
         response = requests.post(
-            "https://fal.run/fal-ai/kling-video/v2.6/pro/image-to-video",
+            "https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video",
             headers=headers,
             json={
                 "prompt": prompt,
@@ -541,7 +542,7 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "duration": duration,
                 "generate_audio": True
             },
-            timeout=30
+            timeout=60
         )
 
         if response.status_code != 200:
@@ -555,14 +556,21 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
 
         result = response.json()
-        request_id = result.get("request_id") or result.get("id")
+        request_id = result.get("request_id")
 
-        if request_id:
-            video_url = None
-            for _ in range(60):
-                time.sleep(5)
+        if not request_id:
+            add_video_credit(user_id, 1)
+            await status_msg.edit_text("❌ Failed to start generation.")
+            await update.message.reply_text("Menu:", reply_markup=main_keyboard())
+            return ConversationHandler.END
+
+        # Poll for result
+        video_url = None
+        for i in range(80):
+            time.sleep(5)
+            try:
                 poll = requests.get(
-                    f"https://fal.run/fal-ai/kling-video/v2.6/pro/image-to-video/requests/{request_id}/status",
+                    f"https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video/requests/{request_id}/status",
                     headers={"Authorization": f"Key {FAL_KEY}"},
                     timeout=30
                 )
@@ -570,23 +578,31 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 status = data.get("status")
 
                 if status == "COMPLETED":
-                    video_url = data.get("video", {}).get("url") or data.get("output", {}).get("video", {}).get("url")
+                    result_resp = requests.get(
+                        f"https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video/requests/{request_id}",
+                        headers={"Authorization": f"Key {FAL_KEY}"},
+                        timeout=30
+                    )
+                    final = result_resp.json()
+                    video_url = final.get("video", {}).get("url") or final.get("response", {}).get("video", {}).get("url")
                     break
-                elif status in ["FAILED", "ERROR"]:
+
+                elif status in ["FAILED", "ERROR", "CANCELLED"]:
                     add_video_credit(user_id, 1)
-                    await status_msg.edit_text("❌ Failed.")
+                    await status_msg.edit_text("❌ Generation failed.")
                     await update.message.reply_text("Menu:", reply_markup=main_keyboard())
                     return ConversationHandler.END
-        else:
-            video_url = result.get("video", {}).get("url")
+
+            except Exception:
+                continue
 
         if not video_url:
             add_video_credit(user_id, 1)
-            await status_msg.edit_text("❌ Timeout or no video.")
+            await status_msg.edit_text("❌ Timeout. Please try again.")
             await update.message.reply_text("Menu:", reply_markup=main_keyboard())
             return ConversationHandler.END
 
-        video_data = requests.get(video_url, timeout=60).content
+        video_data = requests.get(video_url, timeout=90).content
         await update.message.reply_video(
             video=BytesIO(video_data),
             caption=f"✅ Video Ready!\nPrompt: {caption}\nDuration: ~{duration}s\nVideo Credit Left: {get_video_credit(user_id)}",
