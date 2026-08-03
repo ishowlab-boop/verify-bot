@@ -194,7 +194,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Video Credit finished.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Contact Admin", url=ADMIN_LINK)]]))
             return
         await update.message.reply_text(
-            "🎥 Video Verify\n\nSend one clear photo + caption (exactly what she should do/say)\nMax 12 seconds.\nPress Cancel to go back.",
+            "🎥 Video Verify\n\nSend one clear photo + caption (exactly what she should do/say)\nMax 10 seconds.\nPress Cancel to go back.",
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Cancel")]], resize_keyboard=True)
         )
         return WAITING_VIDEO
@@ -503,7 +503,10 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     word_count = len(caption.split())
-    duration = min(12, max(5, word_count // 2 + 3))
+    if word_count <= 8:
+        duration = "5"
+    else:
+        duration = "10"
 
     status_msg = await update.message.reply_text(f"⏳ Generating video (~{duration}s)... Please wait 1-3 minutes.")
 
@@ -529,14 +532,13 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Content-Type": "application/json"
         }
 
-        # Kling with native audio
         response = requests.post(
             "https://fal.run/fal-ai/kling-video/v2.6/pro/image-to-video",
             headers=headers,
             json={
                 "prompt": prompt,
                 "start_image_url": data_uri,
-                "duration": str(duration),
+                "duration": duration,
                 "generate_audio": True
             },
             timeout=30
@@ -553,7 +555,6 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
 
         result = response.json()
-        # fal queue system - may need polling
         request_id = result.get("request_id") or result.get("id")
 
         if request_id:
