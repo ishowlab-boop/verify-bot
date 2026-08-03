@@ -5,6 +5,7 @@ import base64
 import json
 import time
 import requests
+import fal_client
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, BotCommand
 from telegram.ext import (
@@ -35,6 +36,9 @@ ADMIN_WAIT_ACTION = 6
 ADMIN_WAIT_VALIDITY = 7
 
 logging.basicConfig(level=logging.INFO)
+
+# fal key set
+os.environ["FAL_KEY"] = FAL_KEY or ""
 
 def load_json(file):
     try:
@@ -503,18 +507,14 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     word_count = len(caption.split())
-    if word_count <= 8:
-        duration = "5"
-    else:
-        duration = "10"
+    duration = "5" if word_count <= 8 else "10"
 
     status_msg = await update.message.reply_text(f"⏳ Generating video (~{duration}s)... Please wait 2-4 minutes.")
 
     try:
         photo = update.message.photo[-1]
         file = await context.bot.get_file(photo.file_id)
-        image_bytes = await file.download_as_bytearray()
-        data_uri = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
+        image_url = file.file_path
 
         prompt = (
             f"Use the exact same girl from the reference image. "
@@ -527,78 +527,27 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Photorealistic, high quality."
         )
 
-        headers = {
-            "Authorization": f"Key {FAL_KEY}",
-            "Content-Type": "application/json"
-        }
+        def on_queue_update(update):
+            if isinstance(update, fal_client.InProgress):
+                for log in update.logs:
+                    print(log.get("message", ""))
 
-        # Submit to fal queue
-        response = requests.post(
-            "https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video",
-            headers=headers,
-            json={
+        result = fal_client.subscribe(
+            "fal-ai/kling-video/v2.6/pro/image-to-video",
+            arguments={
                 "prompt": prompt,
-                "start_image_url": data_uri,
+                "start_image_url": image_url,
                 "duration": duration,
                 "generate_audio": True
             },
-            timeout=60
+            with_logs=True,
+            on_queue_update=on_queue_update,
         )
 
-        if response.status_code != 200:
-            add_video_credit(user_id, 1)
-            err = response.text
-            if is_balance_error(err):
-                await status_msg.edit_text("❌ Official bot credit Finished. Please contact Admin.")
-            else:
-                await status_msg.edit_text(f"❌ Error: {err}")
-            await update.message.reply_text("Menu:", reply_markup=main_keyboard())
-            return ConversationHandler.END
-
-        result = response.json()
-        request_id = result.get("request_id")
-
-        if not request_id:
-            add_video_credit(user_id, 1)
-            await status_msg.edit_text("❌ Failed to start generation.")
-            await update.message.reply_text("Menu:", reply_markup=main_keyboard())
-            return ConversationHandler.END
-
-        # Poll for result
-        video_url = None
-        for i in range(80):
-            time.sleep(5)
-            try:
-                poll = requests.get(
-                    f"https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video/requests/{request_id}/status",
-                    headers={"Authorization": f"Key {FAL_KEY}"},
-                    timeout=30
-                )
-                data = poll.json()
-                status = data.get("status")
-
-                if status == "COMPLETED":
-                    result_resp = requests.get(
-                        f"https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video/requests/{request_id}",
-                        headers={"Authorization": f"Key {FAL_KEY}"},
-                        timeout=30
-                    )
-                    final = result_resp.json()
-                    video_url = final.get("video", {}).get("url") or final.get("response", {}).get("video", {}).get("url")
-                    break
-
-                elif status in ["FAILED", "ERROR", "CANCELLED"]:
-                    add_video_credit(user_id, 1)
-                    await status_msg.edit_text("❌ Generation failed.")
-                    await update.message.reply_text("Menu:", reply_markup=main_keyboard())
-                    return ConversationHandler.END
-
-            except Exception:
-                continue
-
+        video_url = result.get("video", {}).get("url")
         if not video_url:
             add_video_credit(user_id, 1)
-            await status_msg.edit_text("❌ Timeout. Please try again.")
+            await status_msg.edit_text("❌ No video returned.")
             await update.message.reply_text("Menu:", reply_markup=main_keyboard())
             return ConversationHandler.END
 
