@@ -37,7 +37,6 @@ ADMIN_WAIT_VALIDITY = 7
 
 logging.basicConfig(level=logging.INFO)
 
-# fal key set
 os.environ["FAL_KEY"] = FAL_KEY or ""
 
 def load_json(file):
@@ -198,7 +197,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Video Credit finished.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Contact Admin", url=ADMIN_LINK)]]))
             return
         await update.message.reply_text(
-            "🎥 Video Verify\n\nSend one clear photo + caption (exactly what she should do/say)\nMax 10 seconds.\nPress Cancel to go back.",
+            "🎥 Video Verify\n\nSend one clear photo + caption (exactly what she should do/say)\nMax 5 seconds.\nPress Cancel to go back.",
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Cancel")]], resize_keyboard=True)
         )
         return WAITING_VIDEO
@@ -506,8 +505,7 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Video Credit finished.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    word_count = len(caption.split())
-    duration = "5" if word_count <= 8 else "10"
+    duration = "5"   # Always 5 seconds (never more than 8)
 
     status_msg = await update.message.reply_text(f"⏳ Generating video (~{duration}s)... Please wait 2-4 minutes.")
 
